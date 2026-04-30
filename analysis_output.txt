@@ -1,0 +1,47 @@
+Analyzing sportify...                                           
+
+   info • 'background' is deprecated and shouldn't be used. Use surface instead. This feature was deprecated after v3.18.0-0.1.pre • lib/core/theme/app_theme.dart:17:9 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/album/album_screen.dart:57:35 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/album/album_screen.dart:73:49 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/album/album_screen.dart:168:58 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/artist/artist_screen.dart:55:41 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/artist/artist_screen.dart:63:43 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/artist/artist_screen.dart:85:53 • deprecated_member_use
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/screens/auth/profile_signup_screen.dart:81:23 • deprecated_member_use
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/screens/auth/profile_signup_screen.dart:110:23 • deprecated_member_use
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/screens/auth/profile_signup_screen.dart:139:23 • deprecated_member_use
+   info • The private field _isShuffle could be 'final' • lib/screens/player/now_playing_screen.dart:15:8 • prefer_final_fields
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:31:29 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:87:47 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:169:61 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:247:55 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:272:56 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:319:55 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/player/now_playing_screen.dart:322:53 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/playlist/playlist_screen.dart:70:42 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/playlist/playlist_screen.dart:88:51 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/playlist/playlist_screen.dart:109:51 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/playlist/playlist_screen.dart:200:60 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/search/search_screen.dart:102:56 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/search/search_screen.dart:340:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/search/search_screen.dart:345:48 • deprecated_member_use
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:96:64 • expected_token
+  error • Undefined name 'll' • lib/screens/settings/settings_screen.dart:96:64 • undefined_identifier
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:96:67 • expected_token
+  error • Undefined name 'play' • lib/screens/settings/settings_screen.dart:96:67 • undefined_identifier
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:96:72 • expected_token
+  error • Too many positional arguments: 4 expected, but 10 found • lib/screens/settings/settings_screen.dart:96:72 • extra_positional_arguments
+  error • Undefined name 'you' • lib/screens/settings/settings_screen.dart:96:72 • undefined_identifier
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:96:76 • expected_token
+  error • Undefined name 'something' • lib/screens/settings/settings_screen.dart:96:76 • undefined_identifier
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:96:86 • expected_token
+  error • Undefined name 'similar' • lib/screens/settings/settings_screen.dart:96:86 • undefined_identifier
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:96:93 • expected_token
+  error • Unterminated string literal • lib/screens/settings/settings_screen.dart:96:94 • unterminated_string_literal
+  error • Expected to find ',' • lib/screens/settings/settings_screen.dart:97:17 • expected_token
+   info • 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre • lib/screens/settings/settings_screen.dart:224:9 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/settings/settings_screen.dart:317:42 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/settings/settings_screen.dart:323:42 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/settings/settings_screen.dart:328:40 • deprecated_member_use
+
+43 issues found. (ran in 2.0s)
