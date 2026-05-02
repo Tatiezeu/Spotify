@@ -104,4 +104,21 @@ class Song {
       isLiked: false,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': title,
+      'artists': [{'name': artist, 'id': artistId}],
+      'album': {
+        'id': albumId,
+        'name': albumName,
+        'images': [{'url': coverUrl}]
+      },
+      'preview_url': previewUrl,
+      'duration_ms': duration.inMilliseconds,
+      'explicit': isExplicit,
+      'popularity': playCount,
+    };
+  }
 }

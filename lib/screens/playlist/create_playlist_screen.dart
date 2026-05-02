@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../widgets/sportify_button.dart';
+import '../../services/api_service.dart';
 
 class CreatePlaylistScreen extends StatefulWidget {
   const CreatePlaylistScreen({super.key});
@@ -12,11 +13,30 @@ class CreatePlaylistScreen extends StatefulWidget {
 
 class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
   final _nameController = TextEditingController();
+  bool _isLoading = false;
 
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  void _handleCreate() async {
+    if (_nameController.text.isEmpty) return;
+
+    setState(() => _isLoading = true);
+    final success = await ApiService().createPlaylist(_nameController.text);
+    
+    if (mounted) {
+      setState(() => _isLoading = false);
+      if (success) {
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to create playlist'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   @override
@@ -44,6 +64,7 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
                 border: InputBorder.none,
                 focusedBorder: InputBorder.none,
               ),
+              onSubmitted: (_) => _handleCreate(),
             ),
             const SizedBox(height: 48),
             Row(
@@ -56,15 +77,14 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
                   isFullWidth: false,
                 ),
                 const SizedBox(width: 16),
-                SpotifyButton(
-                  text: 'Create',
-                  onPressed: () {
-                    // Logic to create playlist
-                    Navigator.pop(context);
-                  },
-                  isPrimary: true,
-                  isFullWidth: false,
-                ),
+                _isLoading 
+                  ? const CircularProgressIndicator(color: AppColors.spotifyGreen)
+                  : SpotifyButton(
+                      text: 'Create',
+                      onPressed: _handleCreate,
+                      isPrimary: true,
+                      isFullWidth: false,
+                    ),
               ],
             ),
           ],

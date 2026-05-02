@@ -85,13 +85,13 @@ class Playlist {
       description: json['description'] ?? '',
       coverUrl: (json['images'] != null && json['images'].isNotEmpty)
           ? json['images'][0]['url']
-          : 'https://via.placeholder.com/150',
-      creatorName: json['owner']?['display_name'] ?? 'Unknown Creator',
-      tracks: [], // Tracks usually need to be fetched/parsed separately depending on context
+          : (json['coverUrl'] ?? 'https://via.placeholder.com/150'),
+      creatorName: json['owner']?['display_name'] ?? json['creatorName'] ?? 'Unknown Creator',
+      tracks: (json['tracks'] as List?)?.map((t) => Song.fromJson(t)).toList() ?? [],
       isFollowing: false,
       followerCount: json['followers']?['total'] ?? 0,
       isCollaborative: json['collaborative'] ?? false,
-      isUserCreated: true, // Assuming local DB playlists
+      isUserCreated: true, 
     );
   }
 }

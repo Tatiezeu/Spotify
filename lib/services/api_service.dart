@@ -5,7 +5,7 @@ import '../models/song.dart';
 import '../models/playlist.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:5001/api';
+  static const String baseUrl = 'http://172.20.10.3:5001/api';
   
   // Singleton pattern
   static final ApiService _instance = ApiService._internal();
@@ -210,6 +210,69 @@ class ApiService {
       return response.statusCode == 201;
     } catch (e) {
       print('Create Playlist Error: $e');
+    }
+    return false;
+  }
+
+  Future<Playlist?> getPlaylist(String id) async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/playlists/$id'), headers: _headers);
+      if (response.statusCode == 200) {
+        return Playlist.fromJson(jsonDecode(response.body));
+      }
+    } catch (e) {
+      print('Get Playlist Error: $e');
+    }
+    return null;
+  }
+
+  Future<List<Song>> getLikedSongs() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/playlists/favorites'), headers: _headers);
+      if (response.statusCode == 200) {
+        final List data = jsonDecode(response.body);
+        return data.map((s) => Song.fromJson(s)).toList();
+      }
+    } catch (e) {
+      print('Get Liked Songs Error: $e');
+    }
+    return [];
+  }
+
+  Future<bool> deletePlaylist(String id) async {
+    try {
+      final response = await http.delete(Uri.parse('$baseUrl/playlists/$id'), headers: _headers);
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (e) {
+      print('Delete Playlist Error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> toggleLikeSong(Song song) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/playlists/favorites'),
+        headers: _headers,
+        body: jsonEncode(song.toJson()),
+      );
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print('Toggle Like Error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> addTrackToPlaylist(String playlistId, Song song) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/playlists/$playlistId/add'),
+        headers: _headers,
+        body: jsonEncode(song.toJson()),
+      );
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print('Add Track to Playlist Error: $e');
     }
     return false;
   }

@@ -233,19 +233,35 @@ class _SearchScreenState extends State<SearchScreen> {
                   child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
                 ),
                 const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 4),
-                      Text('Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 4),
+                        Text('Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
+                      ],
+                    ),
                   ),
-                ),
-                const Icon(Icons.play_circle_fill, color: AppColors.spotifyGreen, size: 48),
-              ],
-            ),
+                  Consumer<PlayerProvider>(
+                    builder: (context, player, child) {
+                      final isLiked = player.isLiked(topResult.id);
+                      return IconButton(
+                        icon: Icon(
+                          isLiked ? Icons.favorite : Icons.favorite_border,
+                          color: isLiked ? AppColors.spotifyGreen : Colors.white70,
+                        ),
+                        onPressed: () => player.toggleLike(topResult),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, color: Colors.white70),
+                    onPressed: () => _showSongOptions(context, topResult),
+                  ),
+                  const Icon(Icons.play_circle_fill, color: AppColors.spotifyGreen, size: 48),
+                ],
+              ),
           ),
         ),
         const SizedBox(height: 32),
@@ -256,7 +272,35 @@ class _SearchScreenState extends State<SearchScreen> {
           leading: Image.network(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
           title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(song.artist),
-          trailing: const Icon(Icons.more_horiz, color: AppColors.secondaryText),
+          trailing: SizedBox(
+            width: 70,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Consumer<PlayerProvider>(
+                  builder: (context, player, child) {
+                    final isLiked = player.isLiked(song.id);
+                    return IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      icon: Icon(
+                        isLiked ? Icons.favorite : Icons.favorite_border,
+                        color: isLiked ? AppColors.spotifyGreen : AppColors.secondaryText,
+                        size: 20,
+                      ),
+                      onPressed: () => player.toggleLike(song),
+                    );
+                  },
+                ),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  icon: const Icon(Icons.more_vert, color: AppColors.secondaryText, size: 20),
+                  onPressed: () => _showSongOptions(context, song),
+                ),
+              ],
+            ),
+          ),
           onTap: () {
             context.read<PlayerProvider>().playSong(song);
             Navigator.push(
@@ -268,6 +312,161 @@ class _SearchScreenState extends State<SearchScreen> {
           },
         )).toList(),
       ],
+    );
+  }
+
+  void _showSongOptions(BuildContext context, Song song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF282828),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 24),
+            ListTile(
+              leading: const Icon(Icons.playlist_add, color: Colors.white70),
+              title: const Text('Add to Queue'),
+              onTap: () {
+                context.read<PlayerProvider>().addToQueue(song);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Added to Queue'), duration: Duration(seconds: 1)),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.queue_music, color: Colors.white70),
+              title: const Text('Play Next'),
+              onTap: () {
+                context.read<PlayerProvider>().playNext(song);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Will play next'), duration: Duration(seconds: 1)),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_box_outlined, color: Colors.white70),
+              title: const Text('Add to Playlist'),
+              onTap: () {
+                Navigator.pop(context);
+                _showPlaylistPicker(context, song);
+              },
+            ),
+            Consumer<PlayerProvider>(
+              builder: (context, player, child) {
+                final isLiked = player.isLiked(song.id);
+                return ListTile(
+                  leading: Icon(
+                    isLiked ? Icons.favorite : Icons.favorite_border,
+                    color: isLiked ? AppColors.spotifyGreen : Colors.white70,
+                  ),
+                  title: Text(isLiked ? 'In Liked Songs' : 'Add to Liked Songs'),
+                  onTap: () {
+                    player.toggleLike(song);
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showPlaylistPicker(BuildContext context, Song song) async {
+    final apiService = ApiService();
+    final playlists = await apiService.getPlaylists();
+
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF282828),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 20),
+              const Text('Add to Playlist', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.add, color: AppColors.spotifyGreen),
+                title: const Text('New Playlist'),
+                onTap: () async {
+                  // Show create playlist dialog
+                  Navigator.pop(context);
+                  _showCreatePlaylistDialog(context, song);
+                },
+              ),
+              const Divider(color: Colors.white10),
+              ...playlists.map((playlist) => ListTile(
+                leading: const Icon(Icons.music_note, color: Colors.white70),
+                title: Text(playlist.name),
+                onTap: () async {
+                  final success = await apiService.addTrackToPlaylist(playlist.id, song);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Failed to add'), backgroundColor: success ? AppColors.spotifyGreen : Colors.red),
+                    );
+                  }
+                },
+              )).toList(),
+              const SizedBox(height: 32),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCreatePlaylistDialog(BuildContext context, Song song) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF282828),
+        title: const Text('New Playlist'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'My Playlist #1',
+            hintStyle: TextStyle(color: Colors.white24),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                final success = await ApiService().createPlaylist(controller.text);
+                if (success && context.mounted) {
+                  Navigator.pop(context);
+                  _showPlaylistPicker(context, song);
+                }
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
     );
   }
   

@@ -69,13 +69,7 @@ class SpotifyCloneApp extends StatelessWidget {
         '/playlist/create': (context) => const CreatePlaylistScreen(),
         '/liked-songs': (context) => const PlaylistScreen(isLikedSongs: true),
         '/settings': (context) => const SettingsScreen(),
-        '/queue': (context) => QueueScreen(
-          queue: const [
-            {'title': 'One Of The Girls - Sped Up', 'artist': 'The Weeknd', 'image': 'https://picsum.photos/200?track=1'},
-            {'title': 'Bring It On', 'artist': 'P-Square', 'image': 'https://picsum.photos/200?track=2'},
-          ],
-          onPlay: (index) {},
-        ),
+        '/queue': (context) => const QueueScreen(),
       },
     );
   }

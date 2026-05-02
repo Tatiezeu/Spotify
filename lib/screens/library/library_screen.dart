@@ -3,6 +3,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../widgets/create_menu_bottom_sheet.dart';
 import '../playlist/playlist_screen.dart';
+import '../../services/api_service.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -17,20 +18,48 @@ class _LibraryScreenState extends State<LibraryScreen> {
   final List<String> _subFilters = ['By you', 'By Spotify', 'Mixed'];
   bool _isGridView = true;
   bool _isSearchingInLibrary = false;
+  bool _isLoading = false;
   final TextEditingController _librarySearchController = TextEditingController();
   String _librarySearchText = '';
 
-  final List<Map<String, dynamic>> _libraryData = [
+  List<Map<String, dynamic>> _libraryData = [
     {'title': 'Liked Songs', 'subtitle': 'Playlist • 725 songs', 'type': 'playlist', 'isPinned': true, 'isLiked': true},
-    {'title': 'Mellow Vibes❤️', 'subtitle': 'Playlist • Spotify', 'type': 'playlist', 'isPinned': true, 'isMixed': true},
-    {'title': 'Briel\'s vibes', 'subtitle': 'Playlist • BRIEL', 'type': 'playlist', 'isPinned': true, 'isMixed': true},
-    {'title': 'Afrosongs', 'subtitle': 'Playlist • BRIEL', 'type': 'playlist', 'isMixed': true},
-    {'title': 'Gospel', 'subtitle': 'Playlist • BRIEL', 'type': 'playlist'},
-    {'title': 'Rich Dad Poor Dad', 'subtitle': 'Podcast • Robert Kiyosaki', 'type': 'podcast', 'hasNewEpisode': true},
-    {'title': '19 & Dangerous', 'subtitle': 'Album • Ayra Starr', 'type': 'album'},
-    {'title': 'Freely', 'subtitle': 'Album • sabrina', 'type': 'album'},
-    {'title': 'Local Files', 'subtitle': 'Playlist • 0 tracks', 'type': 'downloaded', 'isLocal': true},
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLibrary();
+  }
+
+  Future<void> _fetchLibrary() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      final playlists = await ApiService().getPlaylists();
+      if (!mounted) return;
+      setState(() {
+        _libraryData = [
+          {'title': 'Liked Songs', 'subtitle': 'Playlist • 725 songs', 'type': 'playlist', 'isPinned': true, 'isLiked': true},
+        ];
+        
+        for (var playlist in playlists) {
+          _libraryData.add({
+            'id': playlist.id,
+            'title': playlist.name,
+            'subtitle': 'Playlist • ${playlist.trackCount} songs',
+            'type': 'playlist',
+            'coverUrl': playlist.coverUrl,
+            'isUserCreated': true,
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('Error fetching library: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   List<Map<String, dynamic>> get _filteredData {
     List<Map<String, dynamic>> filtered = List<Map<String, dynamic>>.from(_libraryData);
@@ -149,7 +178,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
             icon: const Icon(Icons.search, size: 28), 
             onPressed: () => setState(() => _isSearchingInLibrary = !_isSearchingInLibrary)
           ),
-          IconButton(icon: const Icon(Icons.add, size: 28), onPressed: _showCreateMenu),
+          IconButton(
+            icon: const Icon(Icons.add, size: 28), 
+            onPressed: () {
+              Navigator.pushNamed(context, '/playlist/create').then((_) => _fetchLibrary());
+            }
+          ),
         ],
       ),
     );
@@ -266,19 +300,51 @@ class _LibraryScreenState extends State<LibraryScreen> {
           return _buildImportMusicItemGrid();
         }
         final item = data[index];
-        return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => PlaylistScreen(
-                  title: item['title'],
-                  isLikedSongs: item['isLiked'] == true,
+        return Stack(
+          children: [
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PlaylistScreen(
+                      playlistId: item['id'],
+                      title: item['title'],
+                      isLikedSongs: item['isLiked'] == true,
+                    ),
+                  ),
+                ).then((_) => _fetchLibrary());
+              },
+              child: _buildLibraryGridItem(item),
+            ),
+            if (item['isUserCreated'] == true)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.white54, size: 20),
+                  onPressed: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        backgroundColor: const Color(0xFF282828),
+                        title: const Text('Delete Playlist?'),
+                        content: Text('Are you sure you want to delete "${item['title']}"?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+                        ],
+                      ),
+                    );
+
+                    if (confirmed == true) {
+                      await ApiService().deletePlaylist(item['id']);
+                      _fetchLibrary();
+                    }
+                  },
                 ),
               ),
-            );
-          },
-          child: _buildLibraryGridItem(item),
+          ],
         );
       },
     );
@@ -313,24 +379,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
               padding: EdgeInsets.only(right: 4),
               child: Icon(Icons.push_pin, color: AppColors.spotifyGreen, size: 14),
             ),
-          if (item['hasNewEpisode'] == true)
-            const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.circle, color: AppColors.spotifyGreen, size: 8),
-            ),
           Text(item['subtitle'], style: const TextStyle(color: AppColors.secondaryText, fontSize: 13)),
         ],
       ),
+      trailing: item['isUserCreated'] == true ? IconButton(
+        icon: const Icon(Icons.delete_outline, color: Colors.white54, size: 20),
+        onPressed: () async {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: const Color(0xFF282828),
+              title: const Text('Delete Playlist?'),
+              content: Text('Are you sure you want to delete "${item['title']}"?'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+              ],
+            ),
+          );
+
+          if (confirmed == true) {
+            await ApiService().deletePlaylist(item['id']);
+            _fetchLibrary();
+          }
+        },
+      ) : null,
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => PlaylistScreen(
+              playlistId: item['id'],
               title: item['title'],
               isLikedSongs: item['isLiked'] == true,
             ),
           ),
-        );
+        ).then((_) => _fetchLibrary());
       },
     );
   }
@@ -377,8 +461,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(item['type'] == 'artist' ? 100 : 4),
       child: Image.network(
-        'https://picsum.photos/200?random=${item['title']}',
+        item['coverUrl'] ?? 'https://picsum.photos/200?random=${item['title']}',
         width: 64, height: 64, fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          width: 64, height: 64,
+          color: AppColors.panelBackground,
+          child: const Icon(Icons.music_note, color: Colors.white24),
+        ),
       ),
     );
   }

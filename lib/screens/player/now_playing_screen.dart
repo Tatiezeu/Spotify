@@ -55,7 +55,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   @override
   Widget build(BuildContext context) {
     final player = Provider.of<PlayerProvider>(context);
-    final song = widget.song ?? player.currentSong;
+    // Always use the global current song if it exists, otherwise use the one passed to the widget
+    final song = player.currentSong ?? widget.song;
 
     if (song == null) {
       return const Scaffold(
@@ -81,7 +82,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              _buildHeader(context),
+              _buildHeader(context, song),
               Expanded(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
@@ -115,7 +116,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, Song song) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -129,9 +130,21 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             'Briel\'s vibes',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
           ),
+          Consumer<PlayerProvider>(
+            builder: (context, player, child) {
+              final isLiked = player.isLiked(song.id);
+              return IconButton(
+                icon: Icon(
+                  isLiked ? Icons.favorite : Icons.favorite_border,
+                  color: isLiked ? AppColors.spotifyGreen : Colors.white,
+                ),
+                onPressed: () => player.toggleLike(song),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.more_horiz, color: Colors.white),
-            onPressed: () {},
+            onPressed: () => _showSongOptions(context, song),
           ),
         ],
       ),
@@ -252,10 +265,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-            icon: Icon(Icons.shuffle, color: _isShuffle ? AppColors.spotifyGreen : Colors.white, size: 28),
-            onPressed: () => setState(() => _isShuffle = !_isShuffle),
+            icon: Icon(Icons.shuffle, color: player.isShuffle ? AppColors.spotifyGreen : Colors.white, size: 28),
+            onPressed: () => player.toggleShuffle(),
           ),
-          const Icon(Icons.skip_previous, size: 48, color: Colors.white),
+          IconButton(
+            icon: const Icon(Icons.skip_previous, size: 48, color: Colors.white),
+            onPressed: () => player.seekTo(Duration.zero),
+          ),
           GestureDetector(
             onTap: () {
               if (player.isPlaying) {
@@ -277,8 +293,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   : Icon(player.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.black, size: 48),
             ),
           ),
-          const Icon(Icons.skip_next, size: 48, color: Colors.white),
-          const Icon(Icons.repeat, color: Colors.white, size: 28),
+          IconButton(
+            icon: const Icon(Icons.skip_next, size: 48, color: Colors.white),
+            onPressed: () => player.playNextInQueue(),
+          ),
+          IconButton(
+            icon: Icon(Icons.repeat, color: player.isLooping ? AppColors.spotifyGreen : Colors.white, size: 28),
+            onPressed: () => player.toggleLoop(),
+          ),
         ],
       ),
     );
@@ -300,14 +322,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           IconButton(
             icon: const Icon(Icons.queue_music, color: Colors.white, size: 24),
             onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => QueueScreen(
-                queue: const [
-                  {'title': 'One Of The Girls - Sped Up', 'artist': 'The Weeknd', 'image': 'https://picsum.photos/200?track=1'},
-                  {'title': 'Bring It On', 'artist': 'P-Square', 'image': 'https://picsum.photos/200?track=2'},
-                  {'title': 'Super-Héros', 'artist': 'Tayc', 'image': 'https://picsum.photos/200?track=3'},
-                ],
-                onPlay: (index) {},
-              )));
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const QueueScreen()));
             },
           ),
         ],
@@ -460,6 +475,165 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               'Discover more about The Weeknd', 
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSongOptions(BuildContext context, Song song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF282828),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 24),
+            ListTile(
+              leading: const Icon(Icons.playlist_add, color: Colors.white70),
+              title: const Text('Add to Queue'),
+              onTap: () {
+                context.read<PlayerProvider>().addToQueue(song);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Added to Queue'), backgroundColor: AppColors.spotifyGreen),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.queue_music, color: Colors.white70),
+              title: const Text('Play Next'),
+              onTap: () {
+                context.read<PlayerProvider>().playNext(song);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Will play next'), backgroundColor: AppColors.spotifyGreen),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_box_outlined, color: Colors.white70),
+              title: const Text('Add to Playlist', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _showPlaylistPicker(context, song);
+              },
+            ),
+            Consumer<PlayerProvider>(
+              builder: (context, player, child) {
+                final isLiked = player.isLiked(song.id);
+                return ListTile(
+                  leading: Icon(
+                    isLiked ? Icons.favorite : Icons.favorite_border,
+                    color: isLiked ? AppColors.spotifyGreen : Colors.white70,
+                  ),
+                  title: Text(isLiked ? 'In Liked Songs' : 'Add to Liked Songs', style: const TextStyle(color: Colors.white)),
+                  onTap: () {
+                    player.toggleLike(song);
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share, color: Colors.white70),
+              title: const Text('Share', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(context),
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showPlaylistPicker(BuildContext context, Song song) async {
+    final apiService = ApiService();
+    final playlists = await apiService.getPlaylists();
+
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF282828),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 20),
+              const Text('Add to Playlist', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.add, color: AppColors.spotifyGreen),
+                title: const Text('New Playlist', style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  _showCreatePlaylistDialog(context, song);
+                },
+              ),
+              const Divider(color: Colors.white10),
+              ...playlists.map((playlist) => ListTile(
+                leading: const Icon(Icons.music_note, color: Colors.white70),
+                title: Text(playlist.name, style: const TextStyle(color: Colors.white)),
+                onTap: () async {
+                  final success = await apiService.addTrackToPlaylist(playlist.id, song);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Failed to add'), backgroundColor: success ? AppColors.spotifyGreen : Colors.red),
+                    );
+                  }
+                },
+              )).toList(),
+              const SizedBox(height: 32),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCreatePlaylistDialog(BuildContext context, Song song) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF282828),
+        title: const Text('New Playlist', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'My Playlist #1',
+            hintStyle: TextStyle(color: Colors.white24),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                final success = await ApiService().createPlaylist(controller.text);
+                if (success && context.mounted) {
+                  Navigator.pop(context);
+                  _showPlaylistPicker(context, song);
+                }
+              }
+            },
+            child: const Text('Create'),
           ),
         ],
       ),
