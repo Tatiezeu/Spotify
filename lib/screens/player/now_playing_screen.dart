@@ -1,21 +1,90 @@
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../../models/song.dart';
 import 'lyrics_screen.dart';
 import 'queue_screen.dart';
 
 class NowPlayingScreen extends StatefulWidget {
-  const NowPlayingScreen({super.key});
+  final Song? song;
+  const NowPlayingScreen({super.key, this.song});
 
   @override
   State<NowPlayingScreen> createState() => _NowPlayingScreenState();
 }
 
 class _NowPlayingScreenState extends State<NowPlayingScreen> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
   bool _isLiked = true;
   bool _isShuffle = true;
-  double _currentPosition = 0.6;
+  Duration _currentPosition = Duration.zero;
+  Duration _totalDuration = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupAudioPlayer();
+  }
+
+  Future<void> _setupAudioPlayer() async {
+    // Listen to play state changes
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = state == PlayerState.playing;
+        });
+      }
+    });
+
+    // Listen to audio duration changes
+    _audioPlayer.onDurationChanged.listen((newDuration) {
+      if (mounted) {
+        setState(() {
+          _totalDuration = newDuration;
+        });
+      }
+    });
+
+    // Listen to audio position changes
+    _audioPlayer.onPositionChanged.listen((newPosition) {
+      if (mounted) {
+        setState(() {
+          _currentPosition = newPosition;
+        });
+      }
+    });
+
+    // Listen to audio completion
+    _audioPlayer.onPlayerComplete.listen((event) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _currentPosition = Duration.zero;
+        });
+      }
+    });
+
+    // Set source and start playing if preview is available
+    if (widget.song?.previewUrl.isNotEmpty ?? false) {
+      await _audioPlayer.setSourceUrl(widget.song!.previewUrl);
+      await _audioPlayer.play(UrlSource(widget.song!.previewUrl));
+    }
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "$twoDigitMinutes:$twoDigitSeconds";
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,8 +170,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            image: const DecorationImage(
-              image: NetworkImage('https://picsum.photos/800/800?random=nowplaying'),
+            image: DecorationImage(
+              image: NetworkImage(widget.song?.coverUrl ?? 'https://picsum.photos/800/800?random=nowplaying'),
               fit: BoxFit.cover,
             ),
             boxShadow: [
@@ -128,14 +197,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'One Of The Girls - Sped Up',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white),
+                Text(
+                  widget.song?.title ?? 'One Of The Girls - Sped Up',
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  'The Weeknd, JENNIE, Lily-Rose Depp',
+                  widget.song?.artist ?? 'The Weeknd, JENNIE, Lily-Rose Depp',
                   style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 16, fontWeight: FontWeight.w500),
                 ),
               ],
@@ -162,17 +231,21 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               overlayShape: SliderComponentShape.noOverlay,
             ),
             child: Slider(
-              value: _currentPosition,
-              onChanged: (value) => setState(() => _currentPosition = value),
+              value: _currentPosition.inSeconds.toDouble(),
+              max: _totalDuration.inSeconds > 0 ? _totalDuration.inSeconds.toDouble() : 30.0,
+              onChanged: (value) async {
+                final position = Duration(seconds: value.toInt());
+                await _audioPlayer.seek(position);
+              },
             ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: const [
-                Text('2:07', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                Text('-1:18', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              children: [
+                Text(_formatDuration(_currentPosition), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text('-${_formatDuration(_totalDuration - _currentPosition)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
@@ -193,7 +266,19 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           ),
           const Icon(Icons.skip_previous, size: 48, color: Colors.white),
           GestureDetector(
-            onTap: () => setState(() => _isPlaying = !_isPlaying),
+            onTap: () async {
+              if (widget.song?.previewUrl.isEmpty ?? true) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Preview not available for this track.')),
+                );
+                return;
+              }
+              if (_isPlaying) {
+                await _audioPlayer.pause();
+              } else {
+                await _audioPlayer.resume();
+              }
+            },
             child: Container(
               width: 80,
               height: 80,
@@ -256,9 +341,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const LyricsScreen(
-                    songTitle: 'One Of The Girls - Sped Up',
-                    artistName: 'The Weeknd, JENNIE, Lily-Rose Depp',
+                  builder: (context) => LyricsScreen(
+                    songTitle: widget.song?.title ?? 'One Of The Girls - Sped Up',
+                    artistName: widget.song?.artist ?? 'The Weeknd, JENNIE, Lily-Rose Depp',
                   ),
                 ),
               );
@@ -278,8 +363,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ),
           ),
           const SizedBox(height: 24),
+          if (widget.song != null && widget.song!.previewUrl.isEmpty)
+            const Text("Preview not available for this track", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
           Text(
-            "Force me and choke me 'til I pass out\n\nWe don't gotta be in love, no\n\nI don't gotta be the one, no\n\nI just wanna be one of your girls tonight (tonight)",
+            "Tap to see full lyrics...",
             style: TextStyle(
               fontSize: 24, 
               fontWeight: FontWeight.w900, 

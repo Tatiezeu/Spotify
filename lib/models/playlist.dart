@@ -77,4 +77,21 @@ class Playlist {
     }
     return '$followerCount followers';
   }
+
+  factory Playlist.fromJson(Map<String, dynamic> json) {
+    return Playlist(
+      id: json['_id'] ?? json['id'] ?? '',
+      name: json['name'] ?? 'Unknown Playlist',
+      description: json['description'] ?? '',
+      coverUrl: (json['images'] != null && json['images'].isNotEmpty)
+          ? json['images'][0]['url']
+          : 'https://via.placeholder.com/150',
+      creatorName: json['owner']?['display_name'] ?? 'Unknown Creator',
+      tracks: [], // Tracks usually need to be fetched/parsed separately depending on context
+      isFollowing: false,
+      followerCount: json['followers']?['total'] ?? 0,
+      isCollaborative: json['collaborative'] ?? false,
+      isUserCreated: true, // Assuming local DB playlists
+    );
+  }
 }

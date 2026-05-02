@@ -14,10 +14,13 @@ import 'screens/playlist/playlist_screen.dart';
 import 'screens/playlist/create_playlist_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/player/queue_screen.dart';
+import 'services/api_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   debugPrint('Sportify app starting...');
+  
+  await ApiService().init();
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -55,7 +58,13 @@ class SpotifyCloneApp extends StatelessWidget {
           final email = args is String ? args : '';
           return PasswordSignupScreen(email: email);
         },
-        '/signup/profile': (context) => const ProfileSignupScreen(),
+        '/signup/profile': (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, String>?;
+          return ProfileSignupScreen(
+            email: args?['email'] ?? '',
+            password: args?['password'] ?? '',
+          );
+        },
         '/login': (context) => const WelcomeScreen(),
         '/home': (context) => const MainScreen(),
         '/now-playing': (context) => const NowPlayingScreen(),

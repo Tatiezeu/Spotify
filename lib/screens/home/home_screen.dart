@@ -3,6 +3,8 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../playlist/playlist_screen.dart';
 import 'recently_played_screen.dart';
+import '../../services/api_service.dart';
+import '../../models/playlist.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,6 +16,25 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String _selectedFilter = 'All';
   final List<String> _filters = ['All', 'Music', 'Following', 'Podcasts'];
+  
+  List<Playlist> _userPlaylists = [];
+  bool _isLoadingPlaylists = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlaylists();
+  }
+
+  Future<void> _loadPlaylists() async {
+    final playlists = await ApiService().getPlaylists();
+    if (mounted) {
+      setState(() {
+        _userPlaylists = playlists;
+        _isLoadingPlaylists = false;
+      });
+    }
+  }
 
   String _getGreeting() {
     final hour = DateTime.now().hour;
@@ -353,6 +374,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSquareCarousel(String type) {
+    if (type == 'your_playlists') {
+      if (_isLoadingPlaylists) {
+        return const SizedBox(
+          height: 220,
+          child: Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen)),
+        );
+      }
+      if (_userPlaylists.isEmpty) {
+        return const SizedBox(
+          height: 220,
+          child: Center(child: Text('No playlists yet. Create one!', style: TextStyle(color: AppColors.secondaryText))),
+        );
+      }
+      return SizedBox(
+        height: 220,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: _userPlaylists.length,
+          itemBuilder: (context, index) {
+            final playlist = _userPlaylists[index];
+            return _buildSquareItem(
+              playlist.name,
+              'Playlist',
+              playlist.coverUrl,
+            );
+          },
+        ),
+      );
+    }
+
     return SizedBox(
       height: 220,
       child: ListView.builder(

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../playlist/playlist_screen.dart';
+import '../player/now_playing_screen.dart';
+import '../../services/api_service.dart';
+import '../../models/song.dart';
+import 'dart:async';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -13,8 +17,18 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
+  bool _isLoading = false;
+  List<Song> _searchResults = [];
+  Timer? _debounce;
   final List<String> _searchFilters = ['All', 'Music', 'Podcasts & Shows', 'Artists', 'Playlists', 'Albums'];
   String _activeFilter = 'All';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -179,6 +193,16 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildSearchResults() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen));
+    }
+    
+    if (_searchResults.isEmpty) {
+      return const Center(child: Text('No results found.', style: TextStyle(color: AppColors.secondaryText)));
+    }
+
+    final topResult = _searchResults.first;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -194,16 +218,16 @@ class _SearchScreenState extends State<SearchScreen> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: Image.network('https://picsum.photos/100', width: 80, height: 80, fit: BoxFit.cover),
+                child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('One Of The Girls', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
-                    const Text('Song • The Weeknd, JENNIE', style: TextStyle(color: AppColors.secondaryText, fontSize: 14)),
+                    Text('Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
                   ],
                 ),
               ),
@@ -214,14 +238,14 @@ class _SearchScreenState extends State<SearchScreen> {
         const SizedBox(height: 32),
         const Text('Songs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        ...List.generate(5, (index) => ListTile(
+        ..._searchResults.skip(1).take(10).map((song) => ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: Image.network('https://picsum.photos/100?s=$index', width: 48, height: 48, fit: BoxFit.cover),
-          title: Text('Search Result Song ${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: const Text('Artist Name'),
+          leading: Image.network(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+          title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(song.artist),
           trailing: const Icon(Icons.more_horiz, color: AppColors.secondaryText),
           onTap: () {},
-        )),
+        )).toList(),
       ],
     );
   }
@@ -240,6 +264,27 @@ class _SearchScreenState extends State<SearchScreen> {
         onChanged: (value) {
           setState(() {
             _isSearching = value.isNotEmpty;
+            _isLoading = value.isNotEmpty;
+          });
+          
+          if (_debounce?.isActive ?? false) _debounce!.cancel();
+          _debounce = Timer(const Duration(milliseconds: 500), () async {
+            if (value.isNotEmpty) {
+              final results = await ApiService().searchSongs(value);
+              if (mounted) {
+                setState(() {
+                  _searchResults = results;
+                  _isLoading = false;
+                });
+              }
+            } else {
+              if (mounted) {
+                setState(() {
+                  _searchResults = [];
+                  _isLoading = false;
+                });
+              }
+            }
           });
         },
         style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15),

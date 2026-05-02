@@ -45,4 +45,16 @@ class Artist {
     }
     return monthlyListeners.toString();
   }
+
+  factory Artist.fromJson(Map<String, dynamic> json) {
+    return Artist(
+      id: json['id'] ?? '',
+      name: json['name'] ?? 'Unknown Artist',
+      imageUrl: (json['images'] != null && json['images'].isNotEmpty)
+          ? json['images'][0]['url']
+          : 'https://via.placeholder.com/150',
+      monthlyListeners: json['followers']?['total'] ?? 0,
+      globalRank: json['popularity'] ?? 0,
+    );
+  }
 }

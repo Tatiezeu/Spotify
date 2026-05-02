@@ -2,9 +2,17 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../widgets/sportify_button.dart';
+import '../../services/api_service.dart';
 
 class ProfileSignupScreen extends StatefulWidget {
-  const ProfileSignupScreen({super.key});
+  final String email;
+  final String password;
+
+  const ProfileSignupScreen({
+    super.key,
+    required this.email,
+    required this.password,
+  });
 
   @override
   State<ProfileSignupScreen> createState() => _ProfileSignupScreenState();
@@ -179,8 +187,25 @@ class _ProfileSignupScreenState extends State<ProfileSignupScreen> {
               SpotifyButton(
                 text: 'Sign Up',
                 onPressed: _isFormValid
-                    ? () {
-                        Navigator.of(context).pushNamed('/home');
+                    ? () async {
+                        // Call Backend API
+                        final success = await ApiService().register(
+                          _nameController.text,
+                          widget.email,
+                          widget.password,
+                        );
+                        
+                        if (success) {
+                          if (mounted) {
+                            Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+                          }
+                        } else {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Registration failed. Please try again.')),
+                            );
+                          }
+                        }
                       }
                     : null,
               ),

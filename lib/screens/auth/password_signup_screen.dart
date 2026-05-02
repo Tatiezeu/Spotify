@@ -137,7 +137,13 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
                 text: 'Next',
                 onPressed: _isValidPassword
                     ? () {
-                        Navigator.of(context).pushNamed('/signup/profile');
+                        Navigator.of(context).pushNamed(
+                          '/signup/profile',
+                          arguments: {
+                            'email': widget.email,
+                            'password': _passwordController.text,
+                          },
+                        );
                       }
                     : null,
               ),

@@ -1,10 +1,35 @@
 import 'package:flutter/material.dart';
+import '../../services/api_service.dart';
 
-class LyricsScreen extends StatelessWidget {
+class LyricsScreen extends StatefulWidget {
   final String songTitle;
   final String artistName;
 
   const LyricsScreen({super.key, required this.songTitle, required this.artistName});
+
+  @override
+  State<LyricsScreen> createState() => _LyricsScreenState();
+}
+
+class _LyricsScreenState extends State<LyricsScreen> {
+  String _lyrics = '';
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLyrics();
+  }
+
+  Future<void> _fetchLyrics() async {
+    final lyrics = await ApiService().getLyrics(widget.artistName, widget.songTitle);
+    if (mounted) {
+      setState(() {
+        _lyrics = lyrics;
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,27 +48,16 @@ class LyricsScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(songTitle, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            Text(artistName, style: const TextStyle(fontSize: 16, color: Colors.white70)),
+            Text(widget.songTitle, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Text(widget.artistName, style: const TextStyle(fontSize: 16, color: Colors.white70)),
             const SizedBox(height: 48),
-            const Text(
-              "Mon amour,\n"
-              "Je t'ai promis la lune,\n"
-              "Mais je n'ai que mon cœur à t'offrir.\n\n"
-              "Épouse-moi,\n"
-              "Devenons une seule âme,\n"
-              "Construisons notre avenir dès ce soir.\n\n"
-              "Tu es ma reine,\n"
-              "Ma vie, mon tout,\n"
-              "Je ne vois que toi,\n"
-              "Dans la foule, partout.\n\n"
-              "Le temps s'arrête,\n"
-              "Quand tes yeux croisent les miens,\n"
-              "Je t'aimerai,\n"
-              "Jusqu'au bout du chemin.\n\n"
-              "Épouse-moi...",
-              style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, height: 1.5, color: Colors.white),
-            ),
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator(color: Colors.white))
+            else
+              Text(
+                _lyrics,
+                style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, height: 1.5, color: Colors.white),
+              ),
             const SizedBox(height: 100),
           ],
         ),
