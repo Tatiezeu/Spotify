@@ -20,6 +20,8 @@ class NowPlayingScreen extends StatefulWidget {
 class _NowPlayingScreenState extends State<NowPlayingScreen> {
   bool _isLiked = true;
   bool _isShuffle = true;
+  bool _isDragging = false;
+  double _dragValue = 0.0;
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
@@ -205,10 +207,26 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               overlayShape: SliderComponentShape.noOverlay,
             ),
             child: Slider(
-              value: player.position.inSeconds.toDouble(),
+              value: _isDragging 
+                  ? _dragValue 
+                  : player.position.inSeconds.toDouble().clamp(0, player.duration.inSeconds > 0 ? player.duration.inSeconds.toDouble() : 300.0),
               max: player.duration.inSeconds > 0 ? player.duration.inSeconds.toDouble() : 300.0,
+              onChangeStart: (value) {
+                setState(() {
+                  _isDragging = true;
+                  _dragValue = value;
+                });
+              },
               onChanged: (value) {
+                setState(() {
+                  _dragValue = value;
+                });
+              },
+              onChangeEnd: (value) {
                 player.seekTo(Duration(seconds: value.toInt()));
+                setState(() {
+                  _isDragging = false;
+                });
               },
             ),
           ),
@@ -217,8 +235,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(_formatDuration(player.position), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                Text('-${_formatDuration(player.duration - player.position)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(_formatDuration(_isDragging ? Duration(seconds: _dragValue.toInt()) : player.position), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text('-${_formatDuration(player.duration - (_isDragging ? Duration(seconds: _dragValue.toInt()) : player.position))}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),

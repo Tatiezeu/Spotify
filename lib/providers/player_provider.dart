@@ -92,7 +92,7 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   void seekTo(Duration position) {
-    _controller.seekTo(seconds: position.inSeconds.toDouble());
+    _controller.seekTo(seconds: position.inSeconds.toDouble(), allowSeekAhead: true);
   }
 
   @override
