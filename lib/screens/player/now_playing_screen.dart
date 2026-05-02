@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../models/song.dart';
 import 'lyrics_screen.dart';
 import 'queue_screen.dart';
+import '../../services/api_service.dart';
+import '../../providers/player_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class NowPlayingScreen extends StatefulWidget {
   final Song? song;
@@ -15,69 +18,8 @@ class NowPlayingScreen extends StatefulWidget {
 }
 
 class _NowPlayingScreenState extends State<NowPlayingScreen> {
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  bool _isPlaying = false;
   bool _isLiked = true;
   bool _isShuffle = true;
-  Duration _currentPosition = Duration.zero;
-  Duration _totalDuration = Duration.zero;
-
-  @override
-  void initState() {
-    super.initState();
-    _setupAudioPlayer();
-  }
-
-  Future<void> _setupAudioPlayer() async {
-    // Listen to play state changes
-    _audioPlayer.onPlayerStateChanged.listen((state) {
-      if (mounted) {
-        setState(() {
-          _isPlaying = state == PlayerState.playing;
-        });
-      }
-    });
-
-    // Listen to audio duration changes
-    _audioPlayer.onDurationChanged.listen((newDuration) {
-      if (mounted) {
-        setState(() {
-          _totalDuration = newDuration;
-        });
-      }
-    });
-
-    // Listen to audio position changes
-    _audioPlayer.onPositionChanged.listen((newPosition) {
-      if (mounted) {
-        setState(() {
-          _currentPosition = newPosition;
-        });
-      }
-    });
-
-    // Listen to audio completion
-    _audioPlayer.onPlayerComplete.listen((event) {
-      if (mounted) {
-        setState(() {
-          _isPlaying = false;
-          _currentPosition = Duration.zero;
-        });
-      }
-    });
-
-    // Set source and start playing if preview is available
-    if (widget.song?.previewUrl.isNotEmpty ?? false) {
-      await _audioPlayer.setSourceUrl(widget.song!.previewUrl);
-      await _audioPlayer.play(UrlSource(widget.song!.previewUrl));
-    }
-  }
-
-  @override
-  void dispose() {
-    _audioPlayer.dispose();
-    super.dispose();
-  }
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
@@ -86,10 +28,42 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     return "$twoDigitMinutes:$twoDigitSeconds";
   }
 
+  Future<void> _downloadSong(Song? song) async {
+    if (song == null) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Preparing download...')),
+    );
+
+    try {
+      final videoId = await ApiService().getYoutubeVideoId(song.artist, song.title);
+      if (videoId != null) {
+        final downloadUrl = Uri.parse(
+          '${ApiService.baseUrl}/youtube/download?videoId=$videoId&title=${Uri.encodeComponent("${song.artist} - ${song.title}")}'
+        );
+        if (await canLaunchUrl(downloadUrl)) {
+          await launchUrl(downloadUrl, mode: LaunchMode.externalApplication);
+        }
+      }
+    } catch (e) {
+      debugPrint('Download Error: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final player = Provider.of<PlayerProvider>(context);
+    final song = widget.song ?? player.currentSong;
+
+    if (song == null) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: Text('No song selected')),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFF536D6D), // Grey-green background as seen in image
+      backgroundColor: const Color(0xFF536D6D),
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -112,17 +86,17 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Column(
                     children: [
-                      _buildAlbumArt(),
+                      _buildAlbumArt(song),
                       const SizedBox(height: 48),
-                      _buildSongInfo(),
+                      _buildSongInfo(song),
                       const SizedBox(height: 24),
-                      _buildProgressBar(context),
+                      _buildProgressBar(context, player),
                       const SizedBox(height: 16),
-                      _buildControls(),
+                      _buildControls(player),
                       const SizedBox(height: 32),
-                      _buildFooterActions(),
+                      _buildFooterActions(song),
                       const SizedBox(height: 40),
-                      _buildLyricsSection(),
+                      _buildLyricsSection(song),
                       const SizedBox(height: 24),
                       _buildSongDNASection(),
                       const SizedBox(height: 24),
@@ -162,7 +136,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildAlbumArt() {
+  Widget _buildAlbumArt(Song song) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: AspectRatio(
@@ -171,7 +145,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             image: DecorationImage(
-              image: NetworkImage(widget.song?.coverUrl ?? 'https://picsum.photos/800/800?random=nowplaying'),
+              image: NetworkImage(song.coverUrl),
               fit: BoxFit.cover,
             ),
             boxShadow: [
@@ -187,7 +161,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildSongInfo() {
+  Widget _buildSongInfo(Song song) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
@@ -198,13 +172,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.song?.title ?? 'One Of The Girls - Sped Up',
+                  song.title,
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  widget.song?.artist ?? 'The Weeknd, JENNIE, Lily-Rose Depp',
+                  song.artist,
                   style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 16, fontWeight: FontWeight.w500),
                 ),
               ],
@@ -216,7 +190,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildProgressBar(BuildContext context) {
+  Widget _buildProgressBar(BuildContext context, PlayerProvider player) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
@@ -231,11 +205,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               overlayShape: SliderComponentShape.noOverlay,
             ),
             child: Slider(
-              value: _currentPosition.inSeconds.toDouble(),
-              max: _totalDuration.inSeconds > 0 ? _totalDuration.inSeconds.toDouble() : 30.0,
-              onChanged: (value) async {
-                final position = Duration(seconds: value.toInt());
-                await _audioPlayer.seek(position);
+              value: player.position.inSeconds.toDouble(),
+              max: player.duration.inSeconds > 0 ? player.duration.inSeconds.toDouble() : 300.0,
+              onChanged: (value) {
+                player.seekTo(Duration(seconds: value.toInt()));
               },
             ),
           ),
@@ -244,8 +217,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(_formatDuration(_currentPosition), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                Text('-${_formatDuration(_totalDuration - _currentPosition)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(_formatDuration(player.position), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text('-${_formatDuration(player.duration - player.position)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
@@ -254,7 +227,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildControls() {
+  Widget _buildControls(PlayerProvider player) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
@@ -266,17 +239,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           ),
           const Icon(Icons.skip_previous, size: 48, color: Colors.white),
           GestureDetector(
-            onTap: () async {
-              if (widget.song?.previewUrl.isEmpty ?? true) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Preview not available for this track.')),
-                );
-                return;
-              }
-              if (_isPlaying) {
-                await _audioPlayer.pause();
+            onTap: () {
+              if (player.isPlaying) {
+                player.pause();
               } else {
-                await _audioPlayer.resume();
+                player.resume();
               }
             },
             child: Container(
@@ -287,7 +254,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 color: Colors.white,
                 border: Border.all(color: Colors.white.withOpacity(0.2), width: 4),
               ),
-              child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.black, size: 48),
+              child: player.isLoading 
+                  ? const Center(child: CircularProgressIndicator(color: Colors.black))
+                  : Icon(player.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.black, size: 48),
             ),
           ),
           const Icon(Icons.skip_next, size: 48, color: Colors.white),
@@ -297,13 +266,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildFooterActions() {
+  Widget _buildFooterActions(Song song) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Icon(Icons.devices_outlined, color: Colors.white, size: 24),
+          IconButton(
+            icon: const Icon(Icons.download_for_offline_outlined, color: Colors.white, size: 24),
+            onPressed: () => _downloadSong(song),
+          ),
           const Spacer(),
           const Icon(Icons.ios_share, color: Colors.white, size: 24),
           const SizedBox(width: 32),
@@ -325,12 +297,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildLyricsSection() {
+  Widget _buildLyricsSection(Song song) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF4A5D5D), // Matches the greenish lyrics background
+        color: const Color(0xFF4A5D5D),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -342,8 +314,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => LyricsScreen(
-                    songTitle: widget.song?.title ?? 'One Of The Girls - Sped Up',
-                    artistName: widget.song?.artist ?? 'The Weeknd, JENNIE, Lily-Rose Depp',
+                    songTitle: song.title,
+                    artistName: song.artist,
                   ),
                 ),
               );
@@ -363,7 +335,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          if (widget.song != null && widget.song!.previewUrl.isEmpty)
+          if (song.previewUrl.isEmpty)
             const Text("Preview not available for this track", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           Text(

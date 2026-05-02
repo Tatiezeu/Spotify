@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_text_styles.dart';
+import '../models/song.dart';
+import '../providers/player_provider.dart';
 import 'home/home_screen.dart';
 import 'search/search_screen.dart';
 import 'library/library_screen.dart';
 import 'stats/listening_stats_screen.dart';
 import 'settings/settings_screen.dart';
-import 'player/queue_screen.dart';
+import 'player/now_playing_screen.dart';
 import '../widgets/create_menu_bottom_sheet.dart';
 
 class MainScreen extends StatefulWidget {
@@ -19,16 +23,6 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  bool _isPlaying = true;
-  int _currentTrackIndex = 0;
-  final List<Map<String, String>> _tracks = [
-    {'title': 'STEALING YOUR LIFE – Stop Delaying Your Greatness', 'artist': 'Denzel Washington Motivational Speech', 'image': 'https://picsum.photos/200?track=1'},
-    {'title': 'Bring It On', 'artist': 'P-Square, Dave Scott', 'image': 'https://picsum.photos/200?track=2'},
-    {'title': 'Super-Héros', 'artist': 'Tayc', 'image': 'https://picsum.photos/200?track=3'},
-    {'title': 'Naughty Girl', 'artist': 'SLOWBURN', 'image': 'https://picsum.photos/200?track=4'},
-  ];
-  final List<Map<String, String>> _queue = [];
 
   final List<Widget> _screens = [
     const HomeScreen(),
@@ -49,6 +43,16 @@ class _MainScreenState extends State<MainScreen> {
             index: _selectedIndex,
             children: _screens,
           ),
+          // Hidden YouTube Player (Alive globally)
+          Positioned(
+            left: 0, top: 0,
+            child: SizedBox(
+              width: 1, height: 1,
+              child: YoutubePlayer(
+                controller: context.read<PlayerProvider>().controller,
+              ),
+            ),
+          ),
           _buildFloatingMiniPlayer(context),
         ],
       ),
@@ -57,56 +61,98 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _buildFloatingMiniPlayer(BuildContext context) {
-    final track = _tracks[_currentTrackIndex];
-    return Positioned(
-      left: 8,
-      right: 8,
-      bottom: 0,
-      child: GestureDetector(
-        onTap: () => Navigator.of(context).pushNamed('/now-playing'),
-        child: Container(
-          height: 64,
-          decoration: BoxDecoration(
-            color: const Color(0xFF2E4D4D), 
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.5),
-                blurRadius: 10,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.network(track['image']!, width: 48, height: 48, fit: BoxFit.cover),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(track['title']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text(track['artist']!, style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ],
+    return Consumer<PlayerProvider>(
+      builder: (context, player, child) {
+        final song = player.currentSong;
+        if (song == null) return const SizedBox.shrink();
+
+        return Positioned(
+          left: 8,
+          right: 8,
+          bottom: 0,
+          child: GestureDetector(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => NowPlayingScreen(song: song),
                 ),
+              );
+            },
+            child: Container(
+              height: 68,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2E4D4D), 
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.5),
+                    blurRadius: 10,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.devices_other, color: Colors.white, size: 24),
-                onPressed: () {},
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: Image.network(song.coverUrl, width: 44, height: 44, fit: BoxFit.cover),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Text(song.artist, style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
+                          if (player.isLoading)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 8.0),
+                              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                            ),
+                          IconButton(
+                            icon: Icon(player.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 30),
+                            onPressed: () {
+                              if (player.isPlaying) {
+                                player.pause();
+                              } else {
+                                player.resume();
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Thin Progress Bar
+                  if (player.duration.inSeconds > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: player.position.inSeconds / player.duration.inSeconds,
+                          backgroundColor: Colors.white10,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                          minHeight: 2,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                ],
               ),
-              IconButton(
-                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32),
-                onPressed: () => setState(() => _isPlaying = !_isPlaying),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

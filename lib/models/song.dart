@@ -64,24 +64,38 @@ class Song {
   }
 
   factory Song.fromJson(Map<String, dynamic> json) {
-    // Safely extract artists
+    // 1. Determine Title/Name
+    final String title = json['name']?.toString() ?? 'Unknown';
+
+    // 2. Handle Artists (could be a list for tracks, or the object itself for artists)
     final artists = json['artists'] as List?;
-    final firstArtist = (artists != null && artists.isNotEmpty) ? artists[0] : null;
+    String artistName = 'Unknown Artist';
+    String artistId = '';
     
-    // Safely extract album and images
+    if (artists != null && artists.isNotEmpty) {
+      artistName = artists[0]['name']?.toString() ?? 'Unknown Artist';
+      artistId = artists[0]['id']?.toString() ?? '';
+    } else if (json['type'] == 'artist') {
+      artistName = json['name']?.toString() ?? 'Unknown Artist';
+      artistId = json['id']?.toString() ?? '';
+    }
+
+    // 3. Handle Images (in 'album' for tracks, or at root for artists/albums)
     final album = json['album'] as Map<String, dynamic>?;
-    final images = album?['images'] as List?;
-    final coverUrl = (images != null && images.isNotEmpty) 
-        ? images[0]['url'] ?? 'https://via.placeholder.com/150'
-        : 'https://via.placeholder.com/150';
+    final images = (album != null) ? album['images'] as List? : json['images'] as List?;
+    
+    String coverUrl = 'https://via.placeholder.com/150';
+    if (images != null && images.isNotEmpty) {
+      coverUrl = images[0]['url'] ?? coverUrl;
+    }
 
     return Song(
       id: json['id']?.toString() ?? '',
-      title: json['name']?.toString() ?? 'Unknown Title',
-      artist: firstArtist?['name']?.toString() ?? 'Unknown Artist',
-      artistId: firstArtist?['id']?.toString() ?? '',
+      title: title,
+      artist: artistName,
+      artistId: artistId,
       albumId: album?['id']?.toString() ?? '',
-      albumName: album?['name']?.toString() ?? 'Unknown Album',
+      albumName: album?['name']?.toString() ?? (json['type'] == 'album' ? title : 'Single'),
       coverUrl: coverUrl,
       previewUrl: json['preview_url']?.toString() ?? '',
       duration: Duration(milliseconds: json['duration_ms'] is int ? json['duration_ms'] : 0),

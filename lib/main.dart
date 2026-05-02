@@ -15,6 +15,8 @@ import 'screens/playlist/create_playlist_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/player/queue_screen.dart';
 import 'services/api_service.dart';
+import 'package:provider/provider.dart';
+import 'providers/player_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,21 +24,14 @@ void main() async {
   
   await ApiService().init();
 
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.black,
-      systemNavigationBarIconBrightness: Brightness.light,
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => PlayerProvider()),
+      ],
+      child: const SpotifyCloneApp(),
     ),
   );
-
-  runApp(const SpotifyCloneApp());
 }
 
 class SpotifyCloneApp extends StatelessWidget {

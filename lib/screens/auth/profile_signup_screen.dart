@@ -261,9 +261,11 @@ class _ProfileSignupScreenState extends State<ProfileSignupScreen> {
                   : null,
             ),
             const SizedBox(width: 12),
-            Text(
-              gender,
-              style: AppTextStyles.bodyLarge,
+            Expanded(
+              child: Text(
+                gender,
+                style: AppTextStyles.bodyLarge,
+              ),
             ),
           ],
         ),

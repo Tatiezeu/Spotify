@@ -5,6 +5,8 @@ import '../playlist/playlist_screen.dart';
 import '../player/now_playing_screen.dart';
 import '../../services/api_service.dart';
 import '../../models/song.dart';
+import 'package:provider/provider.dart';
+import '../../providers/player_provider.dart';
 import 'dart:async';
 
 class SearchScreen extends StatefulWidget {
@@ -208,31 +210,42 @@ class _SearchScreenState extends State<SearchScreen> {
       children: [
         const Text('Top result', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.panelBackground,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
+        GestureDetector(
+          onTap: () {
+            context.read<PlayerProvider>().playSong(topResult);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => NowPlayingScreen(song: topResult),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 4),
-                    Text('Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
-                  ],
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.panelBackground,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
                 ),
-              ),
-              const Icon(Icons.play_circle_fill, color: AppColors.spotifyGreen, size: 48),
-            ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 4),
+                      Text('Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.play_circle_fill, color: AppColors.spotifyGreen, size: 48),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 32),
@@ -244,7 +257,15 @@ class _SearchScreenState extends State<SearchScreen> {
           title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(song.artist),
           trailing: const Icon(Icons.more_horiz, color: AppColors.secondaryText),
-          onTap: () {},
+          onTap: () {
+            context.read<PlayerProvider>().playSong(song);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => NowPlayingScreen(song: song),
+              ),
+            );
+          },
         )).toList(),
       ],
     );
@@ -270,7 +291,13 @@ class _SearchScreenState extends State<SearchScreen> {
           if (_debounce?.isActive ?? false) _debounce!.cancel();
           _debounce = Timer(const Duration(milliseconds: 500), () async {
             if (value.isNotEmpty) {
-              final results = await ApiService().searchSongs(value);
+              // Map UI filter to Spotify API type
+              String searchType = 'track';
+              if (_activeFilter == 'Artists') searchType = 'artist';
+              if (_activeFilter == 'Albums') searchType = 'album';
+              if (_activeFilter == 'All') searchType = 'track,artist,album';
+              
+              final results = await ApiService().searchSongs(value, type: searchType);
               if (mounted) {
                 setState(() {
                   _searchResults = results;

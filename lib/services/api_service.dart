@@ -5,7 +5,7 @@ import '../models/song.dart';
 import '../models/playlist.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:5000/api';
+  static const String baseUrl = 'http://localhost:5001/api';
   
   // Singleton pattern
   static final ApiService _instance = ApiService._internal();
@@ -17,6 +17,11 @@ class ApiService {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('jwt_token');
+    print('ApiService initialized. Token: ${_token != null ? "Loaded" : "Not Found"}');
+  }
+  
+  void setToken(String token) {
+    _token = token;
   }
 
   Map<String, String> get _headers => {
@@ -37,6 +42,7 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         _token = data['token'];
+        print('Login Successful. Token set for requests.');
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', _token!);
         return true;
@@ -58,6 +64,7 @@ class ApiService {
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body);
         _token = data['token'];
+        print('Registration Successful. Token set for requests.');
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', _token!);
         return true;
@@ -77,20 +84,32 @@ class ApiService {
   bool get isLoggedIn => _token != null;
 
   // --- Spotify Search ---
-
-  Future<List<Song>> searchSongs(String query) async {
+  
+  Future<List<Song>> searchSongs(String query, {String type = 'track'}) async {
     if (query.isEmpty) return [];
     
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/spotify/search?q=$query&type=track'),
+        Uri.parse('$baseUrl/spotify/search?q=${Uri.encodeComponent(query)}&type=$type'),
         headers: _headers,
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final items = data['tracks']?['items'] as List? ?? [];
-        print('Found ${items.length} results');
+        
+        // Handle different search result structures based on type
+        List items = [];
+        if (type.contains('track')) {
+          items.addAll(data['tracks']?['items'] as List? ?? []);
+        }
+        if (type.contains('artist') && !type.contains('track')) {
+          items.addAll(data['artists']?['items'] as List? ?? []);
+        }
+        if (type.contains('album') && !type.contains('track') && !type.contains('artist')) {
+          items.addAll(data['albums']?['items'] as List? ?? []);
+        }
+
+        print('Search successful. Found ${items.length} results for "$query" (type: $type)');
         return items.map((item) => Song.fromJson(item)).toList();
       } else {
         print('Search failed with status: ${response.statusCode}');
@@ -117,6 +136,49 @@ class ApiService {
       print('Lyrics Error: $e');
     }
     return 'Lyrics not available.';
+  }
+
+  // --- Deezer Audio ---
+
+  Future<String?> getDeezerPreview(String artist, String title) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/deezer/track?artist=${Uri.encodeComponent(artist)}&title=${Uri.encodeComponent(title)}'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['preview']; // This is the audio URL
+      } else {
+        print('Deezer lookup failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Deezer Error: $e');
+    }
+    return null;
+  }
+
+  // --- YouTube Bridge ---
+
+  Future<String?> getYoutubeVideoId(String artist, String title) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/youtube/search?q=${Uri.encodeComponent("$artist $title")}'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['videoId'];
+      } else {
+        print('YouTube lookup failed with status: ${response.statusCode}');
+        print('YouTube response: ${response.body}');
+      }
+    } catch (e) {
+      print('YouTube Error: $e');
+    }
+    return null;
   }
 
   // --- Playlists ---
