@@ -6,6 +6,7 @@ import 'screens/auth/welcome_screen.dart';
 import 'screens/auth/email_signup_screen.dart';
 import 'screens/auth/password_signup_screen.dart';
 import 'screens/auth/profile_signup_screen.dart';
+import 'screens/auth/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/player/now_playing_screen.dart';
 import 'screens/artist/artist_screen.dart';
@@ -60,7 +61,7 @@ class SpotifyCloneApp extends StatelessWidget {
             password: args?['password'] ?? '',
           );
         },
-        '/login': (context) => const WelcomeScreen(),
+        '/login': (context) => const LoginScreen(),
         '/home': (context) => const MainScreen(),
         '/now-playing': (context) => const NowPlayingScreen(),
         '/artist': (context) => const ArtistScreen(),

@@ -5,9 +5,16 @@ import '../../widgets/song_row.dart';
 import '../../widgets/carousel_section.dart';
 import '../../widgets/media_card.dart';
 import '../../models/song.dart';
+import '../../providers/player_provider.dart';
+import 'package:provider/provider.dart';
+import '../player/now_playing_screen.dart';
+import '../../services/api_service.dart';
 
 class ArtistScreen extends StatefulWidget {
-  const ArtistScreen({super.key});
+  final String? artistId;
+  final String? artistName;
+
+  const ArtistScreen({super.key, this.artistId, this.artistName});
 
   @override
   State<ArtistScreen> createState() => _ArtistScreenState();
@@ -16,21 +23,30 @@ class ArtistScreen extends StatefulWidget {
 class _ArtistScreenState extends State<ArtistScreen> {
   bool _isFollowing = false;
   bool _showAllPopular = false;
+  bool _isLoading = true;
+  List<Song> _popularSongs = [];
 
-  final List<Song> _popularSongs = List.generate(
-    10,
-    (index) => Song(
-      id: 'song_$index',
-      title: 'Song Title ${index + 1}',
-      artist: 'Artist Name',
-      artistId: 'artist_1',
-      albumId: 'album_1',
-      albumName: 'Album Name',
-      coverUrl: 'https://picsum.photos/200?random=$index',
-      duration: const Duration(minutes: 3, seconds: 30),
-      playCount: 1000000 - (index * 100000),
-    ),
-  );
+  @override
+  void initState() {
+    super.initState();
+    _fetchArtistData();
+  }
+
+  Future<void> _fetchArtistData() async {
+    if (widget.artistName == null) return;
+    setState(() => _isLoading = true);
+    try {
+      final songs = await ApiService().searchSpotify(widget.artistName!, type: 'track');
+      if (mounted) {
+        setState(() {
+          _popularSongs = songs;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +93,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Artist Name',
+                          widget.artistName ?? 'Artist Name',
                           style: AppTextStyles.displayLarge.copyWith(
                             fontSize: 48,
                             shadows: [
@@ -170,11 +186,14 @@ class _ArtistScreenState extends State<ArtistScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _showAllPopular ? _popularSongs.length : 5,
-                  itemBuilder: (context, index) {
+                if (_isLoading)
+                  const Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen))
+                else
+                  ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _showAllPopular ? _popularSongs.length : (_popularSongs.length > 5 ? 5 : _popularSongs.length),
+                    itemBuilder: (context, index) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -197,7 +216,10 @@ class _ArtistScreenState extends State<ArtistScreen> {
                             child: SongRow(
                               song: _popularSongs[index],
                               showAlbumArt: true,
-                              onTap: () {},
+                              onTap: () {
+                                context.read<PlayerProvider>().playSong(_popularSongs[index]);
+                                Navigator.push(context, MaterialPageRoute(builder: (context) => NowPlayingScreen(song: _popularSongs[index])));
+                              },
                             ),
                           ),
                         ],

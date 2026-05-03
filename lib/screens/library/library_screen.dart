@@ -1,9 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../widgets/create_menu_bottom_sheet.dart';
 import '../playlist/playlist_screen.dart';
 import '../../services/api_service.dart';
+import '../../widgets/profile_avatar.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -21,6 +27,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _isLoading = false;
   final TextEditingController _librarySearchController = TextEditingController();
   String _librarySearchText = '';
+  StreamSubscription? _playlistSub;
+  String _selectedSort = 'By you';
+  bool _isSortAscending = true;
+  String? _likedSongsCoverPath;
 
   List<Map<String, dynamic>> _libraryData = [
     {'title': 'Liked Songs', 'subtitle': 'Playlist • 725 songs', 'type': 'playlist', 'isPinned': true, 'isLiked': true},
@@ -30,6 +40,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void initState() {
     super.initState();
     _fetchLibrary();
+    _loadLikedSongsCover();
+    _playlistSub = ApiService().onPlaylistsChanged.listen((_) {
+      _fetchLibrary();
+    });
+  }
+
+  Future<void> _loadLikedSongsCover() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _likedSongsCoverPath = prefs.getString('liked_songs_cover_path');
+    });
+  }
+  
+  @override
+  void dispose() {
+    _playlistSub?.cancel();
+    _librarySearchController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchLibrary() async {
@@ -37,10 +65,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     setState(() => _isLoading = true);
     try {
       final playlists = await ApiService().getPlaylists();
+      final likedSongs = await ApiService().getLikedSongs();
       if (!mounted) return;
       setState(() {
         _libraryData = [
-          {'title': 'Liked Songs', 'subtitle': 'Playlist • 725 songs', 'type': 'playlist', 'isPinned': true, 'isLiked': true},
+          {'title': 'Liked Songs', 'subtitle': 'Playlist • ${likedSongs.length} songs', 'type': 'playlist', 'isPinned': true, 'isLiked': true},
         ];
         
         for (var playlist in playlists) {
@@ -61,9 +90,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  Future<void> _updatePlaylistCover(String playlistId) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    
+    if (pickedFile != null) {
+      // For now, we'll use the path as the coverUrl. 
+      // In a real app, you'd upload this to a server (e.g. S3, Cloudinary).
+      final success = await ApiService().updatePlaylistCover(playlistId, pickedFile.path);
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Playlist cover updated!')),
+        );
+        _fetchLibrary();
+      }
+    }
+  }
+
   List<Map<String, dynamic>> get _filteredData {
     List<Map<String, dynamic>> filtered = List<Map<String, dynamic>>.from(_libraryData);
     
+    // 1. Filter by type
     if (_selectedFilter != 'All') {
       if (_selectedFilter == 'Downloaded') {
         filtered = filtered.where((item) => item['type'] == 'downloaded').toList();
@@ -73,13 +120,90 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
     }
 
+    // 2. Search
     if (_librarySearchText.isNotEmpty) {
       filtered = filtered.where((item) => 
         item['title'].toLowerCase().contains(_librarySearchText.toLowerCase())
       ).toList();
     }
 
+    // 3. Sort
+    switch (_selectedSort) {
+      case 'Recently added':
+        // Default order from API/DB is usually chronological (reverse of insertion)
+        break;
+      case 'Alphabetical':
+        filtered.sort((a, b) => (a['title'] as String).toLowerCase().compareTo((b['title'] as String).toLowerCase()));
+        if (!_isSortAscending) filtered = filtered.reversed.toList();
+        break;
+      case 'By Artist':
+        filtered.sort((a, b) {
+          final aSub = (a['subtitle'] as String).toLowerCase();
+          final bSub = (b['subtitle'] as String).toLowerCase();
+          return aSub.compareTo(bSub);
+        });
+        break;
+      default: // 'By you'
+        // Keep original order
+        break;
+    }
+
     return filtered;
+  }
+
+  void _updateLikedSongsCover() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('liked_songs_cover_path', pickedFile.path);
+      setState(() {
+        _likedSongsCoverPath = pickedFile.path;
+      });
+      _fetchLibrary();
+    }
+  }
+
+  void _showSortMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF282828),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            const Text('Sort by', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const Divider(color: Colors.white10),
+            _buildSortOption('By you'),
+            _buildSortOption('Recently added'),
+            _buildSortOption('Alphabetical'),
+            _buildSortOption('By Artist'),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSortOption(String sort) {
+    final isSelected = _selectedSort == sort;
+    return ListTile(
+      title: Text(sort, style: TextStyle(color: isSelected ? AppColors.spotifyGreen : Colors.white)),
+      trailing: isSelected ? const Icon(Icons.check, color: AppColors.spotifyGreen) : null,
+      onTap: () {
+        if (sort == 'Alphabetical' && isSelected) {
+          setState(() => _isSortAscending = !_isSortAscending);
+        } else {
+          setState(() {
+            _selectedSort = sort;
+            _isSortAscending = true;
+          });
+        }
+        Navigator.pop(context);
+      },
+    );
   }
 
   void _showCreateMenu() {
@@ -147,28 +271,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           Builder(
             builder: (context) => GestureDetector(
               onTap: () => Scaffold.of(context).openDrawer(),
-              child: Stack(
-                children: [
-                  const CircleAvatar(
-                    radius: 18,
-                    backgroundColor: AppColors.panelBackground,
-                    child: Icon(Icons.person, color: Colors.white, size: 20),
-                  ),
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: Colors.blueAccent,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.primaryBackground, width: 2),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              child: const ProfileAvatar(),
             ),
           ),
           const SizedBox(width: 16),
@@ -251,13 +354,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.swap_vert, color: Colors.white, size: 20),
-              const SizedBox(width: 8),
-              Text(_selectedFilter == 'Downloaded' ? 'Recently added' : 'Recents', 
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-            ],
+          GestureDetector(
+            onTap: _showSortMenu,
+            child: Row(
+              children: [
+                const Icon(Icons.swap_vert, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Text(_selectedSort, 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              ],
+            ),
           ),
           IconButton(
             icon: Icon(_isGridView ? Icons.list : Icons.grid_view, color: Colors.white, size: 20),
@@ -423,9 +529,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(child: _buildItemImage(item)),
+        AspectRatio(
+          aspectRatio: 1,
+          child: _buildItemImage(item, isGrid: true),
+        ),
         const SizedBox(height: 8),
-        Text(item['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
+        Text(item['title'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
         Row(
           children: [
             if (item['isPinned'] == true)
@@ -433,42 +542,74 @@ class _LibraryScreenState extends State<LibraryScreen> {
             if (item['isMixed'] == true)
               const Icon(Icons.tune, color: Colors.white70, size: 10),
             const SizedBox(width: 4),
-            Expanded(child: Text(item['subtitle'], style: const TextStyle(color: AppColors.secondaryText, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            Expanded(child: Text(item['subtitle'] ?? '', style: const TextStyle(color: AppColors.secondaryText, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildItemImage(Map<String, dynamic> item) {
+  Widget _buildItemImage(Map<String, dynamic> item, {bool isGrid = false}) {
     if (item['isLiked'] == true) {
-      return Container(
-        width: 64, height: 64,
-        decoration: BoxDecoration(
-          gradient: AppColors.likedSongsGradient,
-          borderRadius: BorderRadius.circular(4),
+      Widget? backgroundImage;
+      if (_likedSongsCoverPath != null && _likedSongsCoverPath!.isNotEmpty) {
+        try {
+          backgroundImage = kIsWeb 
+            ? Image.network(_likedSongsCoverPath!, fit: BoxFit.cover, errorBuilder: (ctx, err, st) => const Icon(Icons.favorite, color: Colors.white, size: 30))
+            : Image.file(File(_likedSongsCoverPath!), fit: BoxFit.cover, errorBuilder: (ctx, err, st) => const Icon(Icons.favorite, color: Colors.white, size: 30));
+        } catch (e) {
+          backgroundImage = const Icon(Icons.favorite, color: Colors.white, size: 30);
+        }
+      }
+
+      return GestureDetector(
+        onTap: isGrid ? _updateLikedSongsCover : null,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: backgroundImage == null ? AppColors.likedSongsGradient : null,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: backgroundImage ?? const Icon(Icons.favorite, color: Colors.white, size: 30),
+          ),
         ),
-        child: const Icon(Icons.favorite, color: Colors.white, size: 30),
       );
     }
-    if (item['isLocal'] == true) {
-      return Container(
-        width: 64, height: 64,
-        decoration: BoxDecoration(color: const Color(0xFF1B2A4A), borderRadius: BorderRadius.circular(4)),
-        child: const Icon(Icons.folder, color: AppColors.spotifyGreen, size: 30),
+    
+    Widget imageWidget;
+    String? coverUrl = item['coverUrl'];
+    
+    if (coverUrl != null && (coverUrl.startsWith('http') || coverUrl.startsWith('blob'))) {
+      imageWidget = Image.network(
+        coverUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );
+    } else if (coverUrl != null && coverUrl.isNotEmpty) {
+      // Local file path
+      imageWidget = kIsWeb 
+        ? Image.network(coverUrl, fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => _buildPlaceholder())
+        : Image.file(File(coverUrl), fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => _buildPlaceholder());
+    } else {
+      imageWidget = _buildPlaceholder();
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(item['type'] == 'artist' ? 100 : 4),
-      child: Image.network(
-        item['coverUrl'] ?? 'https://picsum.photos/200?random=${item['title']}',
-        width: 64, height: 64, fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Container(
-          width: 64, height: 64,
-          color: AppColors.panelBackground,
-          child: const Icon(Icons.music_note, color: Colors.white24),
-        ),
+
+    return GestureDetector(
+      onTap: (isGrid && item['isUserCreated'] == true) 
+        ? () => _updatePlaylistCover(item['id'])
+        : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(item['type'] == 'artist' ? 100 : 4),
+        child: imageWidget,
       ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: AppColors.panelBackground,
+      child: const Icon(Icons.music_note, color: Colors.white24),
     );
   }
 

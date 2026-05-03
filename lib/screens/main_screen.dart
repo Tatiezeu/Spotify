@@ -12,6 +12,8 @@ import 'stats/listening_stats_screen.dart';
 import 'settings/settings_screen.dart';
 import 'player/now_playing_screen.dart';
 import '../widgets/create_menu_bottom_sheet.dart';
+import '../widgets/profile_avatar.dart';
+import '../services/api_service.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -195,10 +197,10 @@ class _MainScreenState extends State<MainScreen> {
       child: Column(
         children: [
           const SizedBox(height: 60),
-          const ListTile(
-            leading: CircleAvatar(backgroundColor: AppColors.panelBackground, child: Icon(Icons.person, color: Colors.white)),
-            title: Text('Briel vibe', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-            subtitle: Text('View Profile', style: TextStyle(color: AppColors.secondaryText, fontSize: 12)),
+          ListTile(
+            leading: const ProfileAvatar(radius: 20, showBadge: false),
+            title: Text(ApiService().firstname, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+            subtitle: const Text('View Profile', style: TextStyle(color: AppColors.secondaryText, fontSize: 12)),
           ),
           const Divider(color: Colors.white10),
           _buildSidebarItem(Icons.bolt, 'What\'s new'),

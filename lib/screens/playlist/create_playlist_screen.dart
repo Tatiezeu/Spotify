@@ -3,9 +3,11 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../widgets/sportify_button.dart';
 import '../../services/api_service.dart';
+import '../../models/song.dart';
 
 class CreatePlaylistScreen extends StatefulWidget {
-  const CreatePlaylistScreen({super.key});
+  final Song? initialSong;
+  const CreatePlaylistScreen({super.key, this.initialSong});
 
   @override
   State<CreatePlaylistScreen> createState() => _CreatePlaylistScreenState();
@@ -30,7 +32,12 @@ class _CreatePlaylistScreenState extends State<CreatePlaylistScreen> {
     if (mounted) {
       setState(() => _isLoading = false);
       if (success) {
-        Navigator.pop(context);
+        if (widget.initialSong != null) {
+          final playlists = await ApiService().getPlaylists();
+          final newPlaylist = playlists.firstWhere((p) => p.name == _nameController.text);
+          await ApiService().addTrackToPlaylist(newPlaylist.id, widget.initialSong!);
+        }
+        if (mounted) Navigator.pop(context, true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to create playlist'), backgroundColor: Colors.red),

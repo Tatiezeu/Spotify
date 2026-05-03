@@ -14,15 +14,23 @@ class PlayerProvider extends ChangeNotifier {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Set<String> _likedSongIds = {};
+  List<Song> _likedSongs = [];
+  List<Song> _history = [];
+
+  List<Map<String, dynamic>> _currentLyrics = [];
+  bool _isFetchingLyrics = false;
 
   PlayerProvider() {
     _likedSongIds = {};
+    _currentLyrics = [];
     _initController();
     _fetchLikedSongs();
   }
 
   // Getters
   Song? get currentSong => _currentSong;
+  List<Map<String, dynamic>> get currentLyrics => _currentLyrics;
+  bool get isFetchingLyrics => _isFetchingLyrics;
   List<Song> get queue => _queue;
   bool get isLooping => _isLooping;
   bool get isShuffle => _isShuffle;
@@ -32,6 +40,8 @@ class PlayerProvider extends ChangeNotifier {
   Duration get position => _position;
   Duration get duration => _duration;
   Set<String> get likedSongIds => _likedSongIds;
+  List<Song> get likedSongs => _likedSongs;
+  List<Song> get history => _history;
 
   bool isLiked(String? songId) {
     if (songId == null) return false;
@@ -47,6 +57,7 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> _fetchLikedSongs() async {
     try {
       final likedSongs = await ApiService().getLikedSongs();
+      _likedSongs = likedSongs;
       _likedSongIds = likedSongs.map((s) => s.id).toSet();
       notifyListeners();
     } catch (e) {
@@ -59,8 +70,10 @@ class PlayerProvider extends ChangeNotifier {
     if (success) {
       if (_likedSongIds.contains(song.id)) {
         _likedSongIds.remove(song.id);
+        _likedSongs.removeWhere((s) => s.id == song.id);
       } else {
         _likedSongIds.add(song.id);
+        _likedSongs.add(song);
       }
       notifyListeners();
     }
@@ -119,6 +132,12 @@ class PlayerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setQueue(List<Song> songs) {
+    _queue.clear();
+    _queue.addAll(songs);
+    notifyListeners();
+  }
+
   void playNext(Song song) {
     _queue.insert(0, song);
     notifyListeners();
@@ -157,7 +176,7 @@ class PlayerProvider extends ChangeNotifier {
     
     debugPrint('Queue empty. Starting Smart Radio for: ${_currentSong!.artist}');
     try {
-      final suggestions = await ApiService().searchSongs(_currentSong!.artist);
+      final suggestions = await ApiService().searchSpotify(_currentSong!.artist);
       if (suggestions.isNotEmpty) {
         // Filter out the current song to avoid repeats
         final filteredSuggestions = suggestions.where((s) => s.id != _currentSong!.id).toList();
@@ -191,25 +210,55 @@ class PlayerProvider extends ChangeNotifier {
     }
 
     _currentSong = song;
+    _currentLyrics = []; // Clear old lyrics
+    _addToHistory(song);
     _isLoading = true;
+    _isFetchingLyrics = true;
     _position = Duration.zero;
     _duration = Duration.zero;
+    
+    // Stop the previous video audio immediately
+    _controller.pauseVideo();
     notifyListeners();
 
+    // Fetch lyrics in background
+    ApiService().getParsedLyrics(song.artist, song.title).then((lyrics) {
+      if (_currentSong?.id == song.id) {
+        _currentLyrics = lyrics;
+        _isFetchingLyrics = false;
+        notifyListeners();
+      }
+    });
+
     try {
+      if (song.artist.isEmpty || song.title.isEmpty) {
+        debugPrint('Error: Missing artist or title for playback');
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+      
       debugPrint('Fetching YouTube ID for: ${song.artist} - ${song.title}');
       final videoId = await ApiService().getYoutubeVideoId(song.artist, song.title);
       
-      if (videoId != null) {
-        _controller.loadVideoById(videoId: videoId);
-        // Ensure it starts playing
-        _controller.playVideo();
+      // Verify we are still on the same song after the await
+      if (_currentSong?.id == song.id) {
+        if (videoId != null) {
+          _controller.loadVideoById(videoId: videoId);
+          _controller.playVideo();
+        } else {
+          debugPrint('Error: Could not fetch YouTube ID for ${song.title}');
+          _controller.pauseVideo(); // Stop any pending audio
+        }
       }
     } catch (e) {
       debugPrint('Error playing song: $e');
+      _controller.pauseVideo();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (_currentSong?.id == song.id) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -227,6 +276,13 @@ class PlayerProvider extends ChangeNotifier {
 
   void seekTo(Duration position) {
     _controller.seekTo(seconds: position.inSeconds.toDouble(), allowSeekAhead: true);
+  }
+
+  void _addToHistory(Song song) {
+    _history.removeWhere((s) => s.id == song.id);
+    _history.insert(0, song);
+    if (_history.length > 50) _history.removeLast();
+    notifyListeners();
   }
 
   @override

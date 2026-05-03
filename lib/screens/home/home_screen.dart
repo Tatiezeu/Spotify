@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
@@ -5,6 +8,11 @@ import '../playlist/playlist_screen.dart';
 import 'recently_played_screen.dart';
 import '../../services/api_service.dart';
 import '../../models/playlist.dart';
+import '../../widgets/profile_avatar.dart';
+import 'package:provider/provider.dart';
+import '../../providers/player_provider.dart';
+import '../player/now_playing_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,11 +27,32 @@ class _HomeScreenState extends State<HomeScreen> {
   
   List<Playlist> _userPlaylists = [];
   bool _isLoadingPlaylists = true;
+  StreamSubscription? _playlistSub;
+  String? _likedSongsCoverPath;
 
   @override
   void initState() {
     super.initState();
     _loadPlaylists();
+    _loadLikedSongsCover();
+    _playlistSub = ApiService().onPlaylistsChanged.listen((_) {
+      _loadPlaylists();
+    });
+  }
+
+  Future<void> _loadLikedSongsCover() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _likedSongsCoverPath = prefs.getString('liked_songs_cover_path');
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _playlistSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadPlaylists() async {
@@ -58,27 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.all(12.0),
                 child: GestureDetector(
                   onTap: () => Scaffold.of(context).openDrawer(),
-                  child: Stack(
-                    children: [
-                      const CircleAvatar(
-                        backgroundColor: AppColors.panelBackground,
-                        child: Icon(Icons.person, color: Colors.white, size: 18),
-                      ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        child: Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: Colors.blueAccent,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.primaryBackground, width: 2),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: const ProfileAvatar(),
                 ),
               ),
             ),
@@ -235,26 +244,65 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildRecentGrid() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.count(
-        crossAxisCount: 2,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        childAspectRatio: 2.8,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        children: [
-          _buildRecentCard('Afrosongs', 'Playlist • BRIEL', 'https://picsum.photos/100?1'),
-          _buildRecentCard('Liked Songs', 'Playlist • 725 songs', 'liked'),
-          _buildRecentCard('Gospel', 'Playlist • BRIEL', 'https://picsum.photos/100?2'),
-          _buildRecentCard('Nouveautés camerounaises', 'Playlist • Jos...', 'https://picsum.photos/100?3'),
-          _buildRecentCard('The Lazy Song Bruno Mars Tod...', 'Song • Bruno Mars', 'https://picsum.photos/100?4'),
-          _buildRecentCard('Amir', 'Artist', 'https://picsum.photos/100?5', isCircular: true),
-          _buildRecentCard('Best of toofan', 'Playlist • Toofan', 'https://picsum.photos/100?6'),
-          _buildRecentCard('Cysoul', 'Artist', 'https://picsum.photos/100?7', isCircular: true),
-        ],
-      ),
+    if (_isLoadingPlaylists) {
+      return const Padding(
+        padding: EdgeInsets.all(32.0),
+        child: Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen)),
+      );
+    }
+
+    return Consumer<PlayerProvider>(
+      builder: (context, player, child) {
+        final displayItems = [
+          {
+            'title': 'Liked Songs',
+            'subtitle': 'Playlist • ${player.likedSongIds.length} songs',
+            'image': _likedSongsCoverPath ?? 'liked',
+            'isLiked': true
+          },
+          ..._userPlaylists.take(5).map((p) => {
+            'title': p.name,
+            'subtitle': 'Playlist • ${p.trackCount} songs',
+            'image': (p.coverUrl != null && p.coverUrl!.isNotEmpty) ? p.coverUrl : 'https://picsum.photos/100?random=${p.id}',
+            'id': p.id,
+          }),
+        ];
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 3.2,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: displayItems.length,
+            itemBuilder: (context, index) {
+              final item = displayItems[index];
+              return _buildRecentCard(
+                item['title'] as String,
+                item['subtitle'] as String,
+                item['image'] as String,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PlaylistScreen(
+                        playlistId: item['id'] as String?,
+                        title: item['title'] as String,
+                        isLikedSongs: item['isLiked'] == true,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -364,9 +412,9 @@ class _HomeScreenState extends State<HomeScreen> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
-          _buildSquareItem('Briel\'s vibes', 'Playlist • BRIEL', 'https://picsum.photos/200?r1'),
+          _buildSquareItem('${ApiService().firstname}\'s vibes', 'Playlist • ${ApiService().firstname}', 'https://picsum.photos/200?r1'),
           _buildSquareItem('Your Episodes', '1 episode...', 'https://picsum.photos/200?r2', isEpisode: true),
-          _buildSquareItem('Afrosongs', 'Playlist • BRIEL', 'https://picsum.photos/200?r3'),
+          _buildSquareItem('Afrosongs', 'Playlist • ${ApiService().firstname}', 'https://picsum.photos/200?r3'),
           _buildSquareItem('Nouveautés camerounaises', 'Playlist • Jos...', 'https://picsum.photos/200?r4'),
         ],
       ),
@@ -595,9 +643,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSquareItem(String title, String subtitle, String imageUrl, {bool isEpisode = false}) {
+  Widget _buildSquareItem(String title, String subtitle, String imageUrl, {bool isEpisode = false, VoidCallback? onTap}) {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => PlaylistScreen(title: title))),
+      onTap: onTap ?? () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => PlaylistScreen(title: title))),
       child: Container(
         width: 120,
         margin: const EdgeInsets.only(right: 16),
@@ -645,15 +693,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRecentCard(String title, String subtitle, String imageUrl, {bool isCircular = false}) {
+  ImageProvider _getImageProvider(String url) {
+    if (url.startsWith('http') || url.startsWith('blob:')) {
+      return NetworkImage(url);
+    }
+    if (kIsWeb) {
+      return NetworkImage(url); // Fallback for web paths
+    }
+    return FileImage(File(url));
+  }
+
+  Widget _buildRecentCard(String title, String subtitle, String imageUrl, {bool isCircular = false, VoidCallback? onTap}) {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => PlaylistScreen(
-        isLikedSongs: imageUrl == 'liked',
-        title: title,
-      ))),
-      child: Container(
-        decoration: BoxDecoration(color: AppColors.panelBackground, borderRadius: BorderRadius.circular(4)),
-        child: Row(
+      onTap: onTap ?? () => Navigator.push(context, MaterialPageRoute(builder: (context) => PlaylistScreen(title: title))),
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.panelBackground,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
           children: [
             if (imageUrl == 'liked')
               Container(
@@ -666,7 +727,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: const Icon(Icons.favorite, color: Colors.white, size: 24),
               )
             else
-              Container(width: 52, height: 52, decoration: BoxDecoration(borderRadius: BorderRadius.circular(4), image: DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover))),
+              Container(
+                width: 52, 
+                height: 52, 
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4), 
+                  image: DecorationImage(
+                    image: _getImageProvider(imageUrl), 
+                    fit: BoxFit.cover,
+                    onError: (exception, stackTrace) => const AssetImage('assets/images/placeholder.png'),
+                  )
+                )
+              ),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -683,8 +755,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildPodcastsContent() {
     return Column(

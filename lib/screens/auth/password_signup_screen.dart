@@ -31,15 +31,20 @@ class _PasswordSignupScreenState extends State<PasswordSignupScreen> {
   void _validatePassword() {
     final password = _passwordController.text;
     setState(() {
-      _isValidPassword = password.length >= 8;
+      final hasLength = password.length >= 8;
+      final hasUpper = RegExp(r'[A-Z]').hasMatch(password);
+      final hasNumber = RegExp(r'[0-9]').hasMatch(password);
+      final hasSpecial = RegExp(r'[!@#\$&*~]').hasMatch(password);
+      
+      _isValidPassword = hasLength && hasUpper && hasNumber && hasSpecial;
 
       if (password.isEmpty) {
         _passwordStrength = '';
-      } else if (password.length < 6) {
-        _passwordStrength = 'Weak';
+      } else if (!hasLength) {
+        _passwordStrength = 'Weak (Too short)';
         _strengthColor = AppColors.destructive;
-      } else if (password.length < 10) {
-        _passwordStrength = 'Medium';
+      } else if (!hasUpper || !hasNumber || !hasSpecial) {
+        _passwordStrength = 'Medium (Need uppercase, number, special)';
         _strengthColor = Colors.orange;
       } else {
         _passwordStrength = 'Strong';

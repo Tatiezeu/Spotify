@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
+import '../../providers/player_provider.dart';
+import '../../models/song.dart';
+import '../player/now_playing_screen.dart';
 
 class RecentlyPlayedScreen extends StatelessWidget {
   const RecentlyPlayedScreen({super.key});
@@ -11,22 +15,37 @@ class RecentlyPlayedScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Recently Played', style: TextStyle(fontWeight: FontWeight.bold)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios), onPressed: () => Navigator.pop(context)),
+        title: const Text('Recently played', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: 20,
-        itemBuilder: (context, index) {
-          return ListTile(
-            contentPadding: const EdgeInsets.symmetric(vertical: 4),
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: Image.network('https://picsum.photos/100?r=$index', width: 56, height: 56, fit: BoxFit.cover),
-            ),
-            title: Text('Recent Item ${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Playlist • BRIEL'),
-            trailing: const Icon(Icons.more_vert, color: AppColors.secondaryText),
+      body: Consumer<PlayerProvider>(
+        builder: (context, player, child) {
+          final history = player.history;
+          
+          if (history.isEmpty) {
+            return const Center(
+              child: Text('No recently played music.', style: TextStyle(color: AppColors.secondaryText)),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: history.length,
+            itemBuilder: (context, index) {
+              final song = history[index];
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.network(song.coverUrl, width: 56, height: 56, fit: BoxFit.cover),
+                ),
+                title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(song.artist),
+                onTap: () {
+                  player.playSong(song);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => NowPlayingScreen(song: song)));
+                },
+              );
+            },
           );
         },
       ),

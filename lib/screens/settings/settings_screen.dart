@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
+import '../../services/api_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -350,12 +351,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                '/welcome',
-                (route) => false,
-              );
+            onPressed: () async {
+              await ApiService().logout();
+              if (mounted) {
+                Navigator.of(context).pushNamedAndRemoveUntil(
+                  '/welcome',
+                  (route) => false,
+                );
+              }
             },
             child: Text(
               'Log out',

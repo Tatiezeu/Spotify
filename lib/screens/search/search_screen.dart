@@ -3,11 +3,22 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../playlist/playlist_screen.dart';
 import '../player/now_playing_screen.dart';
+import '../playlist/create_playlist_screen.dart';
+import '../artist/artist_screen.dart';
+import '../album/album_screen.dart';
+import '../home/recently_played_screen.dart';
 import '../../services/api_service.dart';
 import '../../models/song.dart';
 import 'package:provider/provider.dart';
 import '../../providers/player_provider.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../widgets/profile_avatar.dart';
+import '../../models/playlist.dart';
+import '../../utils/song_options_helper.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -24,6 +35,49 @@ class _SearchScreenState extends State<SearchScreen> {
   Timer? _debounce;
   final List<String> _searchFilters = ['All', 'Music', 'Podcasts & Shows', 'Artists', 'Playlists', 'Albums'];
   String _activeFilter = 'All';
+  List<String> _recentSearches = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSearchHistory();
+  }
+
+  Future<void> _loadSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _recentSearches = prefs.getStringList('search_history') ?? [];
+    });
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      await ApiService().updateProfileImage(pickedFile.path);
+      setState(() {}); // Trigger rebuild to show new image in ProfileAvatar
+    }
+  }
+
+
+
+  Future<void> _saveSearchHistory(String query) async {
+    if (query.trim().isEmpty) return;
+    if (!_recentSearches.contains(query)) {
+      _recentSearches.insert(0, query);
+      if (_recentSearches.length > 10) _recentSearches.removeLast();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('search_history', _recentSearches);
+    }
+  }
+
+  Future<void> _clearSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('search_history');
+    setState(() {
+      _recentSearches = [];
+    });
+  }
 
   @override
   void dispose() {
@@ -47,27 +101,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   padding: const EdgeInsets.all(12.0),
                   child: GestureDetector(
                     onTap: () => Scaffold.of(context).openDrawer(),
-                    child: Stack(
-                      children: [
-                        const CircleAvatar(
-                          backgroundColor: AppColors.panelBackground,
-                          child: Icon(Icons.person, color: Colors.white, size: 18),
-                        ),
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: Colors.blueAccent,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: AppColors.primaryBackground, width: 2),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    child: const ProfileAvatar(),
                   ),
                 ),
               ),
@@ -82,7 +116,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.camera_alt_outlined),
-                  onPressed: () {},
+                  onPressed: _pickImage,
                 ),
               ],
             ),
@@ -101,6 +135,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       _buildSearchResults(),
                     ] else ...[
                       const SizedBox(height: 24),
+                      if (_recentSearches.isNotEmpty) _buildSearchHistory(),
                       const Text(
                         'Discover something new',
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -171,7 +206,25 @@ class _SearchScreenState extends State<SearchScreen> {
         children: _searchFilters.map((filter) {
           final isSelected = _activeFilter == filter;
           return GestureDetector(
-            onTap: () => setState(() => _activeFilter = filter),
+            onTap: () {
+              setState(() {
+                _activeFilter = filter;
+                if (_searchController.text.isNotEmpty) {
+                  _isLoading = true;
+                }
+              });
+              if (_searchController.text.isNotEmpty) {
+                // Trigger immediate search with new filter
+                String searchType = 'track';
+                if (filter == 'Artists') searchType = 'artist';
+                if (filter == 'Albums') searchType = 'album';
+                if (filter == 'All') searchType = 'track,artist,album';
+                
+                ApiService().searchSpotify(_searchController.text, type: searchType).then((res) {
+                  if (mounted) setState(() { _searchResults = res; _isLoading = false; });
+                });
+              }
+            },
             child: Container(
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -203,273 +256,178 @@ class _SearchScreenState extends State<SearchScreen> {
       return const Center(child: Text('No results found.', style: TextStyle(color: AppColors.secondaryText)));
     }
 
-    final topResult = _searchResults.first;
+    final tracks = _searchResults.where((s) => s.type == 'track').toList();
+    final artists = _searchResults.where((s) => s.type == 'artist').toList();
+    final albums = _searchResults.where((s) => s.type == 'album').toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Top result', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 16),
-        GestureDetector(
-          onTap: () {
-            context.read<PlayerProvider>().playSong(topResult);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => NowPlayingScreen(song: topResult),
-              ),
-            );
-          },
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.panelBackground,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
-                ),
-                const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 4),
-                        Text('Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
-                      ],
-                    ),
-                  ),
-                  Consumer<PlayerProvider>(
-                    builder: (context, player, child) {
-                      final isLiked = player.isLiked(topResult.id);
-                      return IconButton(
-                        icon: Icon(
-                          isLiked ? Icons.favorite : Icons.favorite_border,
-                          color: isLiked ? AppColors.spotifyGreen : Colors.white70,
-                        ),
-                        onPressed: () => player.toggleLike(topResult),
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.more_vert, color: Colors.white70),
-                    onPressed: () => _showSongOptions(context, topResult),
-                  ),
-                  const Icon(Icons.play_circle_fill, color: AppColors.spotifyGreen, size: 48),
-                ],
-              ),
-          ),
-        ),
-        const SizedBox(height: 32),
-        const Text('Songs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 16),
-        ..._searchResults.skip(1).take(10).map((song) => ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Image.network(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
-          title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(song.artist),
-          trailing: SizedBox(
-            width: 70,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Consumer<PlayerProvider>(
-                  builder: (context, player, child) {
-                    final isLiked = player.isLiked(song.id);
-                    return IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: Icon(
-                        isLiked ? Icons.favorite : Icons.favorite_border,
-                        color: isLiked ? AppColors.spotifyGreen : AppColors.secondaryText,
-                        size: 20,
-                      ),
-                      onPressed: () => player.toggleLike(song),
-                    );
-                  },
-                ),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  icon: const Icon(Icons.more_vert, color: AppColors.secondaryText, size: 20),
-                  onPressed: () => _showSongOptions(context, song),
-                ),
-              ],
-            ),
-          ),
-          onTap: () {
-            context.read<PlayerProvider>().playSong(song);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => NowPlayingScreen(song: song),
-              ),
-            );
-          },
-        )).toList(),
+        if (_activeFilter == 'All' && _searchResults.isNotEmpty) ...[
+          const Text('Top result', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          _buildTopResult(_searchResults.first),
+          const SizedBox(height: 32),
+        ],
+
+        if (artists.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Artists')) ...[
+          const Text('Artists', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          ...artists.map((artist) => _buildArtistTile(artist)).toList(),
+          const SizedBox(height: 24),
+        ],
+
+        if (tracks.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Music' || _activeFilter == 'Songs')) ...[
+          const Text('Songs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          ...tracks.map((song) => _buildTrackTile(song)).toList(),
+          const SizedBox(height: 24),
+        ],
+
+        if (albums.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Albums')) ...[
+          const Text('Albums', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          ...albums.map((album) => _buildAlbumTile(album)).toList(),
+          const SizedBox(height: 24),
+        ],
+        
+        // Handle playlists if any (currently playlists are often returned as albums or special types)
+        if (_activeFilter == 'Playlists') ...[
+          const Text('Playlists', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          ..._searchResults.where((s) => s.type == 'playlist').map((p) => _buildAlbumTile(p)).toList(),
+          const SizedBox(height: 24),
+        ],
       ],
     );
   }
 
-  void _showSongOptions(BuildContext context, Song song) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF282828),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
+  Widget _buildTopResult(Song topResult) {
+    bool isArtist = topResult.type == 'artist';
+    return GestureDetector(
+      onTap: () {
+        if (!isArtist) {
+          context.read<PlayerProvider>().playSong(topResult);
+          Navigator.push(context, MaterialPageRoute(builder: (context) => NowPlayingScreen(song: topResult)));
+        } else {
+          _searchController.text = topResult.title;
+          _activeFilter = 'Music';
+          _debounce?.cancel();
+          setState(() { _isSearching = true; _isLoading = true; });
+          ApiService().searchSpotify(topResult.title, type: 'track').then((res) {
+            if (mounted) setState(() { _searchResults = res; _isLoading = false; });
+          });
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppColors.panelBackground, borderRadius: BorderRadius.circular(8)),
+        child: Row(
           children: [
-            const SizedBox(height: 8),
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 24),
-            ListTile(
-              leading: const Icon(Icons.playlist_add, color: Colors.white70),
-              title: const Text('Add to Queue'),
-              onTap: () {
-                context.read<PlayerProvider>().addToQueue(song);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Added to Queue'), duration: Duration(seconds: 1)),
-                );
-              },
+            ClipRRect(
+              borderRadius: BorderRadius.circular(isArtist ? 40 : 4),
+              child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
             ),
-            ListTile(
-              leading: const Icon(Icons.queue_music, color: Colors.white70),
-              title: const Text('Play Next'),
-              onTap: () {
-                context.read<PlayerProvider>().playNext(song);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Will play next'), duration: Duration(seconds: 1)),
-                );
-              },
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(topResult.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Text(isArtist ? 'Artist' : 'Song • ${topResult.artist}', style: const TextStyle(color: AppColors.secondaryText, fontSize: 14)),
+                ],
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.add_box_outlined, color: Colors.white70),
-              title: const Text('Add to Playlist'),
-              onTap: () {
-                Navigator.pop(context);
-                _showPlaylistPicker(context, song);
-              },
-            ),
+            if (!isArtist)
+              const Icon(Icons.play_circle_fill, color: AppColors.spotifyGreen, size: 48),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildArtistTile(Song artist) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Image.network(artist.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+      ),
+      title: Text(artist.artist, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1),
+      subtitle: const Text('Artist'),
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => ArtistScreen(artistId: artist.artistId, artistName: artist.artist)));
+      },
+    );
+  }
+
+  Widget _buildAlbumTile(Song album) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Image.network(album.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+      title: Text(album.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1),
+      subtitle: Text('Album • ${album.artist}'),
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => AlbumScreen(
+          albumId: album.albumId, 
+          title: album.title,
+          artistName: album.artist,
+          coverUrl: album.coverUrl,
+        )));
+      },
+    );
+  }
+
+  Widget _buildTrackTile(Song song) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Image.network(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+      title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(song.artist),
+      trailing: SizedBox(
+        width: 70,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
             Consumer<PlayerProvider>(
               builder: (context, player, child) {
                 final isLiked = player.isLiked(song.id);
-                return ListTile(
-                  leading: Icon(
-                    isLiked ? Icons.favorite : Icons.favorite_border,
-                    color: isLiked ? AppColors.spotifyGreen : Colors.white70,
-                  ),
-                  title: Text(isLiked ? 'In Liked Songs' : 'Add to Liked Songs'),
-                  onTap: () {
-                    player.toggleLike(song);
-                    Navigator.pop(context);
-                  },
+                return IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  icon: Icon(isLiked ? Icons.favorite : Icons.favorite_border, color: isLiked ? AppColors.spotifyGreen : AppColors.secondaryText, size: 20),
+                  onPressed: () => player.toggleLike(song),
                 );
               },
             ),
-            const SizedBox(height: 16),
+            IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: const Icon(Icons.more_vert, color: AppColors.secondaryText, size: 20),
+              onPressed: () => _showSongOptions(context, song),
+            ),
           ],
-        );
-      },
-    );
-  }
-
-  void _showPlaylistPicker(BuildContext context, Song song) async {
-    final apiService = ApiService();
-    final playlists = await apiService.getPlaylists();
-
-    if (!context.mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF282828),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 20),
-              const Text('Add to Playlist', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              ListTile(
-                leading: const Icon(Icons.add, color: AppColors.spotifyGreen),
-                title: const Text('New Playlist'),
-                onTap: () async {
-                  // Show create playlist dialog
-                  Navigator.pop(context);
-                  _showCreatePlaylistDialog(context, song);
-                },
-              ),
-              const Divider(color: Colors.white10),
-              ...playlists.map((playlist) => ListTile(
-                leading: const Icon(Icons.music_note, color: Colors.white70),
-                title: Text(playlist.name),
-                onTap: () async {
-                  final success = await apiService.addTrackToPlaylist(playlist.id, song);
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Failed to add'), backgroundColor: success ? AppColors.spotifyGreen : Colors.red),
-                    );
-                  }
-                },
-              )).toList(),
-              const SizedBox(height: 32),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showCreatePlaylistDialog(BuildContext context, Song song) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF282828),
-        title: const Text('New Playlist'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'My Playlist #1',
-            hintStyle: TextStyle(color: Colors.white24),
-          ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                final success = await ApiService().createPlaylist(controller.text);
-                if (success && context.mounted) {
-                  Navigator.pop(context);
-                  _showPlaylistPicker(context, song);
-                }
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
       ),
+      onTap: () {
+        context.read<PlayerProvider>().playSong(song);
+        Navigator.push(context, MaterialPageRoute(builder: (context) => NowPlayingScreen(song: song)));
+      },
     );
   }
-  
+
+  void _showSongOptions(BuildContext context, Song song) {
+    SongOptionsHelper.showSongOptions(context, song);
+  }
+
+  void _showPlaylistPicker(BuildContext context, Song song) {
+    SongOptionsHelper.showPlaylistPicker(context, song);
+  }
+
+
+
+
   Widget _buildSearchBar() {
     return Container(
       width: double.infinity,
@@ -490,18 +448,25 @@ class _SearchScreenState extends State<SearchScreen> {
           if (_debounce?.isActive ?? false) _debounce!.cancel();
           _debounce = Timer(const Duration(milliseconds: 500), () async {
             if (value.isNotEmpty) {
-              // Map UI filter to Spotify API type
               String searchType = 'track';
               if (_activeFilter == 'Artists') searchType = 'artist';
               if (_activeFilter == 'Albums') searchType = 'album';
               if (_activeFilter == 'All') searchType = 'track,artist,album';
               
-              final results = await ApiService().searchSongs(value, type: searchType);
+              final spotifyFuture = ApiService().searchSpotify(value, type: searchType).catchError((e) => <Song>[]);
+              final deezerFuture = ApiService().searchDeezer(value).catchError((e) => <Song>[]);
+
+              final results = await Future.wait([spotifyFuture, deezerFuture]);
+              final combinedResults = [...results[0], ...results[1]];
+              
               if (mounted) {
                 setState(() {
-                  _searchResults = results;
+                  _searchResults = combinedResults;
                   _isLoading = false;
                 });
+                if (combinedResults.isNotEmpty) {
+                  _saveSearchHistory(value);
+                }
               }
             } else {
               if (mounted) {
@@ -533,6 +498,50 @@ class _SearchScreenState extends State<SearchScreen> {
           ) : null,
         ),
       ),
+    );
+  }
+
+  Widget _buildSearchHistory() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Recent searches', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            TextButton(
+              onPressed: _clearSearchHistory,
+              child: const Text('Clear All', style: TextStyle(color: Colors.white70)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ..._recentSearches.map((query) => ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.history, color: Colors.white54),
+          title: Text(query, style: const TextStyle(fontWeight: FontWeight.bold)),
+          trailing: IconButton(
+            icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+            onPressed: () {
+              setState(() {
+                _recentSearches.remove(query);
+                SharedPreferences.getInstance().then((prefs) => prefs.setStringList('search_history', _recentSearches));
+              });
+            },
+          ),
+          onTap: () {
+            _searchController.text = query;
+            setState(() { _isSearching = true; _isLoading = true; });
+            Future.wait([
+              ApiService().searchSpotify(query, type: 'track,artist,album'),
+              ApiService().searchDeezer(query)
+            ]).then((res) {
+              if (mounted) setState(() { _searchResults = [...res[0], ...res[1]]; _isLoading = false; });
+            });
+          },
+        )),
+        const SizedBox(height: 24),
+      ],
     );
   }
 
@@ -942,5 +951,104 @@ class CategoryDetailScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _PlaylistPickerSheet extends StatefulWidget {
+  final Song song;
+  const _PlaylistPickerSheet({required this.song});
+
+  static void show(BuildContext context, Song song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF282828),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return _PlaylistPickerSheet(song: song);
+      },
+    );
+  }
+
+  @override
+  State<_PlaylistPickerSheet> createState() => _PlaylistPickerSheetState();
+}
+
+class _PlaylistPickerSheetState extends State<_PlaylistPickerSheet> {
+  bool _loadingPlaylists = true;
+  List<Playlist> _playlists = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchPlaylists();
+  }
+
+  Future<void> _fetchPlaylists() async {
+    final playlists = await ApiService().getPlaylists();
+    if (mounted) {
+      setState(() {
+        _playlists = playlists;
+        _loadingPlaylists = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 20),
+          const Text('Add to Playlist', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 20),
+          if (_loadingPlaylists)
+            const Padding(
+              padding: EdgeInsets.all(32.0),
+              child: CircularProgressIndicator(color: AppColors.spotifyGreen),
+            )
+          else ...[
+            ListTile(
+              leading: const Icon(Icons.add, color: AppColors.spotifyGreen),
+              title: const Text('New Playlist'),
+              onTap: () async {
+                Navigator.pop(context);
+                _showCreatePlaylistDialog(context, widget.song);
+              },
+            ),
+            const Divider(color: Colors.white10),
+            ..._playlists.map((playlist) => ListTile(
+              leading: const Icon(Icons.music_note, color: Colors.white70),
+              title: Text(playlist.name),
+              onTap: () async {
+                final success = await ApiService().addTrackToPlaylist(playlist.id, widget.song);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Failed to add'), backgroundColor: success ? AppColors.spotifyGreen : Colors.red),
+                  );
+                }
+              },
+            )).toList(),
+          ],
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  void _showCreatePlaylistDialog(BuildContext context, Song song) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreatePlaylistScreen(initialSong: song),
+      ),
+    ).then((created) {
+      if (created == true && context.mounted) {
+        _PlaylistPickerSheet.show(context, song);
+      }
+    });
   }
 }

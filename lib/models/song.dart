@@ -11,6 +11,7 @@ class Song {
   final bool isExplicit;
   final bool isLiked;
   final int playCount;
+  final String type; // 'track', 'artist', 'album', 'playlist'
 
   Song({
     required this.id,
@@ -25,6 +26,7 @@ class Song {
     this.isExplicit = false,
     this.isLiked = false,
     this.playCount = 0,
+    this.type = 'track',
   });
 
   Song copyWith({
@@ -40,6 +42,7 @@ class Song {
     bool? isExplicit,
     bool? isLiked,
     int? playCount,
+    String? type,
   }) {
     return Song(
       id: id ?? this.id,
@@ -54,6 +57,7 @@ class Song {
       isExplicit: isExplicit ?? this.isExplicit,
       isLiked: isLiked ?? this.isLiked,
       playCount: playCount ?? this.playCount,
+      type: type ?? this.type,
     );
   }
 
@@ -65,7 +69,7 @@ class Song {
 
   factory Song.fromJson(Map<String, dynamic> json) {
     // 1. Determine Title/Name
-    final String title = json['name']?.toString() ?? 'Unknown';
+    final String title = json['name']?.toString() ?? json['title']?.toString() ?? 'Unknown';
 
     // 2. Handle Artists (could be a list for tracks, or the object itself for artists)
     final artists = json['artists'] as List?;
@@ -75,6 +79,13 @@ class Song {
     if (artists != null && artists.isNotEmpty) {
       artistName = artists[0]['name']?.toString() ?? 'Unknown Artist';
       artistId = artists[0]['id']?.toString() ?? '';
+    } else if (json['artist'] != null) {
+      if (json['artist'] is Map) {
+        artistName = json['artist']['name']?.toString() ?? 'Unknown Artist';
+        artistId = json['artist']['id']?.toString() ?? '';
+      } else {
+        artistName = json['artist'].toString();
+      }
     } else if (json['type'] == 'artist') {
       artistName = json['name']?.toString() ?? 'Unknown Artist';
       artistId = json['id']?.toString() ?? '';
@@ -87,6 +98,10 @@ class Song {
     String coverUrl = 'https://via.placeholder.com/150';
     if (images != null && images.isNotEmpty) {
       coverUrl = images[0]['url'] ?? coverUrl;
+    } else if (json['coverUrl'] != null) {
+      coverUrl = json['coverUrl'].toString();
+    } else if (json['album'] != null && json['album']['cover_medium'] != null) {
+      coverUrl = json['album']['cover_medium'].toString();
     }
 
     return Song(
@@ -94,31 +109,39 @@ class Song {
       title: title,
       artist: artistName,
       artistId: artistId,
-      albumId: album?['id']?.toString() ?? '',
+      albumId: (json['type'] == 'album') ? (json['id']?.toString() ?? '') : (album?['id']?.toString() ?? ''),
       albumName: album?['name']?.toString() ?? (json['type'] == 'album' ? title : 'Single'),
       coverUrl: coverUrl,
-      previewUrl: json['preview_url']?.toString() ?? '',
-      duration: Duration(milliseconds: json['duration_ms'] is int ? json['duration_ms'] : 0),
+      previewUrl: json['previewUrl']?.toString() ?? (json['preview_url']?.toString() ?? ''),
+      duration: Duration(milliseconds: json['duration_ms'] is int ? json['duration_ms'] : (json['duration'] is int ? json['duration'] * 1000 : 0)),
       isExplicit: json['explicit'] == true,
       playCount: json['popularity'] is int ? json['popularity'] : 0,
       isLiked: false,
+      type: json['type']?.toString() ?? 'track',
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'title': title,
       'name': title,
-      'artists': [{'name': artist, 'id': artistId}],
+      'artist': artist,
+      'artistId': artistId,
+      'albumId': albumId,
+      'albumName': albumName,
+      'coverUrl': coverUrl,
+      'previewUrl': previewUrl,
+      'duration_ms': duration.inMilliseconds,
+      'explicit': isExplicit,
+      'popularity': playCount,
+      'type': type,
       'album': {
         'id': albumId,
         'name': albumName,
         'images': [{'url': coverUrl}]
       },
-      'preview_url': previewUrl,
-      'duration_ms': duration.inMilliseconds,
-      'explicit': isExplicit,
-      'popularity': playCount,
+      'artists': [{'name': artist, 'id': artistId}],
     };
   }
 }

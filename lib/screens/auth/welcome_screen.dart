@@ -66,17 +66,12 @@ class WelcomeScreen extends StatelessWidget {
                     icon: const Icon(Icons.apple, color: Colors.white),
                   ),
                   const SizedBox(height: 20),
-                  TextButton(
+                  SpotifyButton(
+                    text: 'Log in',
                     onPressed: () {
-                      Navigator.pushReplacementNamed(context, '/home');
+                      Navigator.pushNamed(context, '/login');
                     },
-                    child: Text(
-                      'Log in',
-                      style: AppTextStyles.labelLarge.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primaryText,
-                      ),
-                    ),
+                    isPrimary: true,
                   ),
                   const SizedBox(height: 20),
                 ],

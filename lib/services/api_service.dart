@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,16 +13,47 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
 
+  final _playlistUpdateController = StreamController<void>.broadcast();
+  Stream<void> get onPlaylistsChanged => _playlistUpdateController.stream;
+
+  void notifyPlaylistsChanged() {
+    _playlistUpdateController.add(null);
+  }
+
+  final _profileUpdateController = StreamController<void>.broadcast();
+  Stream<void> get onProfileChanged => _profileUpdateController.stream;
+
+  void notifyProfileChanged() {
+    _profileUpdateController.add(null);
+  }
+
   String? _token;
+  String? _firstname;
+  String? _email;
+  String? _profileImagePath;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('jwt_token');
+    _firstname = prefs.getString('firstname');
+    _email = prefs.getString('email');
+    _profileImagePath = prefs.getString('profile_image_path');
     print('ApiService initialized. Token: ${_token != null ? "Loaded" : "Not Found"}');
   }
   
   void setToken(String token) {
     _token = token;
+  }
+
+  String get firstname => _firstname ?? 'User';
+  String get email => _email ?? '';
+  String? get profileImagePath => _profileImagePath;
+
+  Future<void> updateProfileImage(String path) async {
+    _profileImagePath = path;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('profile_image_path', path);
+    notifyProfileChanged();
   }
 
   Map<String, String> get _headers => {
@@ -42,9 +74,13 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         _token = data['token'];
+        _firstname = data['firstname'];
+        _email = data['email'];
         print('Login Successful. Token set for requests.');
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', _token!);
+        if (_firstname != null) await prefs.setString('firstname', _firstname!);
+        if (_email != null) await prefs.setString('email', _email!);
         return true;
       }
     } catch (e) {
@@ -64,9 +100,13 @@ class ApiService {
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body);
         _token = data['token'];
+        _firstname = data['firstname'];
+        _email = data['email'];
         print('Registration Successful. Token set for requests.');
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', _token!);
+        if (_firstname != null) await prefs.setString('firstname', _firstname!);
+        if (_email != null) await prefs.setString('email', _email!);
         return true;
       }
     } catch (e) {
@@ -77,27 +117,30 @@ class ApiService {
 
   Future<void> logout() async {
     _token = null;
+    _firstname = null;
+    _email = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('jwt_token');
+    await prefs.remove('firstname');
+    await prefs.remove('email');
   }
 
   bool get isLoggedIn => _token != null;
 
   // --- Spotify Search ---
   
-  Future<List<Song>> searchSongs(String query, {String type = 'track'}) async {
+  Future<List<Song>> searchSpotify(String query, {String type = 'track'}) async {
     if (query.isEmpty) return [];
     
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/spotify/search?q=${Uri.encodeComponent(query)}&type=$type'),
+        Uri.parse('$baseUrl/spotify/search?q=${Uri.encodeComponent(query)}&type=$type&limit=50'),
         headers: _headers,
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         
-        // Handle different search result structures based on type
         List items = [];
         if (type.contains('track')) {
           items.addAll(data['tracks']?['items'] as List? ?? []);
@@ -109,33 +152,102 @@ class ApiService {
           items.addAll(data['albums']?['items'] as List? ?? []);
         }
 
-        print('Search successful. Found ${items.length} results for "$query" (type: $type)');
         return items.map((item) => Song.fromJson(item)).toList();
-      } else {
-        print('Search failed with status: ${response.statusCode}');
-        print('Response body: ${response.body}');
       }
     } catch (e) {
-      print('Search Error: $e');
+      print('Spotify Search Error: $e');
+    }
+    return [];
+  }
+
+  Future<List<Song>> getRelatedArtists(String artistId) async {
+    if (artistId.isEmpty) return [];
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/spotify/artist/$artistId/related-artists'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List items = data['artists'] ?? [];
+        return items.map((item) => Song.fromJson({...item, 'type': 'artist'})).toList();
+      }
+    } catch (e) {
+      print('Related Artists Error: $e');
+    }
+    return [];
+  }
+
+  Future<List<Song>> searchDeezer(String query) async {
+    if (query.isEmpty) return [];
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/deezer/search?q=${Uri.encodeComponent(query)}'),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List items = data['tracks'] ?? [];
+        return items.map((item) => Song.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Deezer Search Error: $e');
     }
     return [];
   }
 
   Future<String> getLyrics(String artist, String title) async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/spotify/lyrics?artist=${Uri.encodeComponent(artist)}&title=${Uri.encodeComponent(title)}'),
-        headers: _headers,
-      );
+      final url = 'https://lrclib.net/api/get?artist_name=${Uri.encodeComponent(artist)}&track_name=${Uri.encodeComponent(title)}';
+      print('Fetching lyrics from: $url');
+      final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['lyrics'] ?? 'Lyrics not available.';
+        return data['syncedLyrics'] ?? data['plainLyrics'] ?? 'Lyrics not available.';
+      } else {
+        print('LRCLIB Lyrics failed with status: ${response.statusCode}');
+        // Try a search if exact match fails
+        final searchUrl = 'https://lrclib.net/api/search?q=${Uri.encodeComponent("$artist $title")}';
+        final searchRes = await http.get(Uri.parse(searchUrl));
+        if (searchRes.statusCode == 200) {
+          final List results = jsonDecode(searchRes.body);
+          if (results.isNotEmpty) {
+            return results[0]['syncedLyrics'] ?? results[0]['plainLyrics'] ?? 'Lyrics not available.';
+          }
+        }
       }
     } catch (e) {
-      print('Lyrics Error: $e');
+      print('LRCLIB Lyrics Error: $e');
     }
     return 'Lyrics not available.';
+  }
+
+  Future<List<Map<String, dynamic>>> getParsedLyrics(String artist, String title) async {
+    final lyrics = await getLyrics(artist, title);
+    if (lyrics == 'Lyrics not available.') return [];
+    
+    final List<Map<String, dynamic>> parsed = [];
+    final lines = lyrics.split('\n');
+    final regExp = RegExp(r'\[(\d+):(\d+\.\d+)\]');
+
+    for (var line in lines) {
+      final match = regExp.firstMatch(line);
+      if (match != null) {
+        final minutes = int.parse(match.group(1)!);
+        final seconds = double.parse(match.group(2)!);
+        final time = Duration(milliseconds: (minutes * 60000 + seconds * 1000).toInt());
+        final text = line.replaceAll(regExp, '').trim();
+        if (text.isNotEmpty) {
+          parsed.add({'time': time, 'text': text});
+        }
+      } else if (line.trim().isNotEmpty) {
+        // Fallback for plain lyrics
+        parsed.add({'time': Duration.zero, 'text': line.trim()});
+      }
+    }
+    return parsed;
   }
 
   // --- Deezer Audio ---
@@ -200,23 +312,57 @@ class ApiService {
     return [];
   }
 
-  Future<bool> createPlaylist(String name) async {
+  Future<bool> createPlaylist(String name, {String coverUrl = '', bool isAlbum = false}) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/playlists'),
         headers: _headers,
-        body: jsonEncode({'name': name, 'tracks': []}),
+        body: jsonEncode({
+          'name': name, 
+          'tracks': [], 
+          'coverUrl': coverUrl,
+          'description': isAlbum ? 'ALBUM_SAVED' : ''
+        }),
       );
-      return response.statusCode == 201;
+      if (response.statusCode == 201) {
+        notifyPlaylistsChanged();
+        return true;
+      }
     } catch (e) {
       print('Create Playlist Error: $e');
     }
     return false;
   }
 
+  Future<bool> saveFullAlbum(String name, String coverUrl, List<Song> tracks) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/playlists'),
+        headers: _headers,
+        body: jsonEncode({
+          'name': name,
+          'tracks': tracks.map((s) => s.toJson()).toList(),
+          'coverUrl': coverUrl,
+          'description': 'ALBUM_SAVED'
+        }),
+      );
+      if (response.statusCode == 201) {
+        notifyPlaylistsChanged();
+        return true;
+      }
+    } catch (e) {
+      print('Save Album Error: $e');
+    }
+    return false;
+  }
+
   Future<Playlist?> getPlaylist(String id) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/playlists/$id'), headers: _headers);
+      final response = await http.get(
+        Uri.parse('$baseUrl/playlists/$id'), 
+        headers: _headers
+      ).timeout(const Duration(seconds: 10));
+      
       if (response.statusCode == 200) {
         return Playlist.fromJson(jsonDecode(response.body));
       }
@@ -242,7 +388,10 @@ class ApiService {
   Future<bool> deletePlaylist(String id) async {
     try {
       final response = await http.delete(Uri.parse('$baseUrl/playlists/$id'), headers: _headers);
-      return response.statusCode == 200 || response.statusCode == 204;
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        notifyPlaylistsChanged();
+        return true;
+      }
     } catch (e) {
       print('Delete Playlist Error: $e');
     }
@@ -266,14 +415,78 @@ class ApiService {
   Future<bool> addTrackToPlaylist(String playlistId, Song song) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/playlists/$playlistId/add'),
+        Uri.parse('$baseUrl/playlists/$playlistId/tracks'),
         headers: _headers,
         body: jsonEncode(song.toJson()),
       );
-      return response.statusCode == 200 || response.statusCode == 201;
+      return response.statusCode == 200;
     } catch (e) {
-      print('Add Track to Playlist Error: $e');
+      print('Add Track Error: $e');
     }
     return false;
+  }
+
+  Future<bool> removeTrackFromPlaylist(String playlistId, String trackId) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/playlists/$playlistId/tracks/$trackId'),
+        headers: _headers,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Remove Track Error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> updatePlaylistCover(String playlistId, String coverUrl) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/playlists/$playlistId'),
+        headers: _headers,
+        body: jsonEncode({'coverUrl': coverUrl}),
+      );
+      if (response.statusCode == 200) {
+        notifyPlaylistsChanged();
+        return true;
+      }
+    } catch (e) {
+      print('Update Playlist Cover Error: $e');
+    }
+    return false;
+  }
+
+  Future<List<Song>> getAlbumTracks(String albumId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/spotify/album/$albumId'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List tracksData = data['tracks']?['items'] ?? [];
+        final albumName = data['name'];
+        final albumCover = (data['images'] as List?)?.isNotEmpty == true ? data['images'][0]['url'] : null;
+        final artistData = (data['artists'] as List?)?.isNotEmpty == true ? data['artists'][0] : null;
+
+        return tracksData.map((track) {
+          final trackMap = Map<String, dynamic>.from(track);
+          // Inject album context into the track object for Song.fromJson to pick up
+          trackMap['album'] = {
+            'id': albumId,
+            'name': albumName,
+            'images': albumCover != null ? [{'url': albumCover}] : [],
+          };
+          if (trackMap['artists'] == null || (trackMap['artists'] as List).isEmpty) {
+            trackMap['artists'] = artistData != null ? [artistData] : [];
+          }
+          return Song.fromJson(trackMap);
+        }).toList();
+      }
+    } catch (e) {
+      print('Get Album Tracks Error: $e');
+    }
+    return [];
   }
 }

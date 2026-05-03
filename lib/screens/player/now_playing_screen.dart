@@ -1,9 +1,12 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../models/song.dart';
 import 'lyrics_screen.dart';
+import '../playlist/create_playlist_screen.dart';
 import 'queue_screen.dart';
 import '../../services/api_service.dart';
 import '../../providers/player_provider.dart';
@@ -22,6 +25,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   bool _isShuffle = true;
   bool _isDragging = false;
   double _dragValue = 0.0;
+  Future<List<Song>>? _relatedArtistsFuture;
+  String? _lastArtistId;
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
@@ -57,6 +62,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final player = Provider.of<PlayerProvider>(context);
     // Always use the global current song if it exists, otherwise use the one passed to the widget
     final song = player.currentSong ?? widget.song;
+
+    if (song != null && song.artistId != _lastArtistId) {
+      _lastArtistId = song.artistId;
+      _relatedArtistsFuture = ApiService().getRelatedArtists(song.artistId);
+    }
 
     if (song == null) {
       return const Scaffold(
@@ -101,9 +111,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       const SizedBox(height: 40),
                       _buildLyricsSection(song),
                       const SizedBox(height: 24),
-                      _buildSongDNASection(),
+                      _buildCreditsSection(song),
                       const SizedBox(height: 24),
-                      _buildAboutArtistSection(),
+                      _buildAboutArtistSection(song),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -126,9 +136,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             icon: const Icon(Icons.keyboard_arrow_down, size: 32, color: Colors.white),
             onPressed: () => Navigator.of(context).pop(),
           ),
-          const Text(
-            'Briel\'s vibes',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+          Text(
+            '${ApiService().firstname}\'s vibes',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
           ),
           Consumer<PlayerProvider>(
             builder: (context, player, child) {
@@ -151,6 +161,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
+  ImageProvider _getImageProvider(String url) {
+    if (url.startsWith('http') || url.startsWith('blob:')) {
+      return NetworkImage(url);
+    }
+    if (kIsWeb) {
+      return NetworkImage(url);
+    }
+    return FileImage(File(url));
+  }
+
   Widget _buildAlbumArt(Song song) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -160,7 +180,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             image: DecorationImage(
-              image: NetworkImage(song.coverUrl),
+              image: _getImageProvider(song.coverUrl),
               fit: BoxFit.cover,
             ),
             boxShadow: [
@@ -341,56 +361,108 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => LyricsScreen(
-                    songTitle: song.title,
-                    artistName: song.artist,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Lyrics', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => LyricsScreen(
+                        songTitle: song.title,
+                        artistName: song.artist,
+                      ),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+                  child: const Icon(Icons.keyboard_arrow_up, color: Colors.white, size: 24),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Consumer<PlayerProvider>(
+            builder: (context, player, child) {
+              if (player.isFetchingLyrics) {
+                return const Text("Loading lyrics...", style: TextStyle(color: Colors.white54, fontSize: 20));
+              }
+
+              final lyrics = player.currentLyrics;
+              if (lyrics.isEmpty) {
+                return const Text("Lyrics not available for this track", style: TextStyle(color: Colors.white54, fontSize: 20));
+              }
+              
+              // Find current line
+              int currentIndex = -1;
+              for (int i = 0; i < lyrics.length; i++) {
+                if (player.position >= lyrics[i]['time']) {
+                  currentIndex = i;
+                } else {
+                  break;
+                }
+              }
+              
+              if (currentIndex == -1) currentIndex = 0;
+              final currentLyric = lyrics[currentIndex];
+              final displayLine = currentLyric['text'];
+              
+              double progress = 0.0;
+              if (currentIndex < lyrics.length - 1) {
+                final nextTime = lyrics[currentIndex + 1]['time'] as Duration;
+                final currentTime = currentLyric['time'] as Duration;
+                final lineDuration = nextTime.inMilliseconds - currentTime.inMilliseconds;
+                if (lineDuration > 0) {
+                  progress = (player.position.inMilliseconds - currentTime.inMilliseconds) / lineDuration;
+                  progress = progress.clamp(0.0, 1.0);
+                }
+              } else {
+                progress = 1.0;
+              }
+              
+              return AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: ShaderMask(
+                  key: ValueKey(displayLine),
+                  shaderCallback: (bounds) {
+                    return LinearGradient(
+                      colors: [Colors.white, Colors.white.withOpacity(0.3)],
+                      stops: [progress, progress],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ).createShader(bounds);
+                  },
+                  child: Text(
+                    displayLine,
+                    style: const TextStyle(
+                      fontSize: 32, 
+                      fontWeight: FontWeight.w900, 
+                      color: Colors.white,
+                      height: 1.3,
+                      letterSpacing: -0.5,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               );
             },
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Lyrics', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
-                Row(
-                  children: const [
-                    Icon(Icons.ios_share, color: Colors.white, size: 20),
-                    SizedBox(width: 16),
-                    Icon(Icons.open_in_full, color: Colors.white, size: 20),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          if (song.previewUrl.isEmpty)
-            const Text("Preview not available for this track", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          Text(
-            "Tap to see full lyrics...",
-            style: TextStyle(
-              fontSize: 24, 
-              fontWeight: FontWeight.w900, 
-              color: Colors.black.withOpacity(0.8),
-              height: 1.4,
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSongDNASection() {
+  Widget _buildCreditsSection(Song song) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF1B2E2E), // Darker section
+        color: const Color(0xFF1B2E2E),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -398,36 +470,45 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
+              const Icon(Icons.group_outlined, color: Colors.white, size: 20),
               const SizedBox(width: 8),
-              const Text('SongDNA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: AppColors.spotifyGreen, borderRadius: BorderRadius.circular(4)),
-                child: const Text('Beta', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
-              ),
+              const Text('Fans also like', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
             ],
           ),
           const SizedBox(height: 24),
-          Row(
-            children: [
-              _buildDNAArtist('The Weeknd', 'Main Artist + 1 more', 'https://picsum.photos/200?w'),
-              const SizedBox(width: 24),
-              _buildDNAArtist('JENNIE', 'Main Artist', 'https://picsum.photos/200?j'),
-            ],
+          FutureBuilder<List<Song>>(
+            future: _relatedArtistsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen));
+              }
+              final related = snapshot.data ?? [];
+              if (related.isEmpty) {
+                return const Text('No suggestions available', style: TextStyle(color: Colors.white70));
+              }
+              return Row(
+                children: [
+                  ...related.take(2).map((artist) => Padding(
+                    padding: const EdgeInsets.only(right: 24),
+                    child: _buildDNAArtist(artist.artist, 'Artist', artist.coverUrl),
+                  )),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('One Of The Girls - Sped Up', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
-                  SizedBox(height: 4),
-                  Text('9 contributors', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Text('Produced by ${song.artist}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  ],
+                ),
               ),
               OutlinedButton(
                 onPressed: () {},
@@ -457,7 +538,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildAboutArtistSection() {
+  Widget _buildAboutArtistSection(Song song) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       clipBehavior: Clip.antiAlias,
@@ -468,12 +549,32 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Image.network('https://picsum.photos/600/350?artist2', height: 200, width: double.infinity, fit: BoxFit.cover),
-          const Padding(
-            padding: EdgeInsets.all(20),
-            child: Text(
-              'Discover more about The Weeknd', 
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+          Container(
+            height: 200,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: _getImageProvider('https://picsum.photos/600/350?${song.artistId}'),
+                fit: BoxFit.cover,
+                onError: (exception, stackTrace) => _getImageProvider(song.coverUrl),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'About ${song.artist}', 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Discover more about ${song.artist} and their musical journey. Tap to see full biography, top tracks, and upcoming releases.',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                ),
+              ],
             ),
           ),
         ],
@@ -606,37 +707,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   void _showCreatePlaylistDialog(BuildContext context, Song song) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF282828),
-        title: const Text('New Playlist', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'My Playlist #1',
-            hintStyle: TextStyle(color: Colors.white24),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                final success = await ApiService().createPlaylist(controller.text);
-                if (success && context.mounted) {
-                  Navigator.pop(context);
-                  _showPlaylistPicker(context, song);
-                }
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreatePlaylistScreen(initialSong: song),
       ),
-    );
+    ).then((created) {
+      if (created == true && context.mounted) {
+        _showPlaylistPicker(context, song);
+      }
+    });
   }
 }
