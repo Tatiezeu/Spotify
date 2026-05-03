@@ -272,7 +272,11 @@ class ApiService {
   }
 
   // --- YouTube Bridge ---
-
+  // BACKEND CONNECTION:
+  // This calls our custom backend endpoint `/api/youtube/search`.
+  // The backend uses `yt-search` to find the exact audio track (avoiding music videos
+  // with long intros). It returns a `videoId`, which `PlayerProvider` passes to the
+  // `youtube_player_iframe` package to silently stream the audio.
   Future<String?> getYoutubeVideoId(String artist, String title) async {
     try {
       final response = await http.get(
@@ -456,6 +460,12 @@ class ApiService {
     return false;
   }
 
+  // BACKEND CONNECTION:
+  // Calls the custom backend `/api/spotify/album/:id` endpoint.
+  // The backend was specifically engineered to return the FULL album object 
+  // (instead of just the tracks) so we can manually map the album `name` 
+  // and `cover image` down into each individual track here on the frontend.
+  // This ensures that when a song is played, `NowPlayingScreen` has an image to display.
   Future<List<Song>> getAlbumTracks(String albumId) async {
     try {
       final response = await http.get(

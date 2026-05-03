@@ -209,6 +209,12 @@ class PlayerProvider extends ChangeNotifier {
       return;
     }
 
+    // CORE PLAYBACK ORCHESTRATION:
+    // 1. Instantly updates the UI state to show the new song metadata (cover, title).
+    // 2. Pauses the `youtube_player_iframe` to prevent overlapping audio.
+    // 3. Asynchronously fetches lyrics from LRCLIB while keeping the UI responsive.
+    // 4. Calls the custom backend `/api/youtube/search` to find the audio stream.
+    // 5. Plays the stream natively in the hidden iframe.
     _currentSong = song;
     _currentLyrics = []; // Clear old lyrics
     _addToHistory(song);
