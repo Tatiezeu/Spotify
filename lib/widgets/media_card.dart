@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_text_styles.dart';
+import '../utils/image_helper.dart';
 
 class MediaCard extends StatelessWidget {
   final String imageUrl;
@@ -37,7 +38,7 @@ class MediaCard extends StatelessWidget {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(isCircular ? 80 : 4),
-                  child: Image.network(
+                  child: ImageHelper.imageWidget(
                     imageUrl,
                     width: cardWidth,
                     height: cardWidth,

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../providers/player_provider.dart';
 import '../../models/song.dart';
+import '../../utils/image_helper.dart';
 import '../player/now_playing_screen.dart';
 
 class RecentlyPlayedScreen extends StatelessWidget {
@@ -36,7 +37,7 @@ class RecentlyPlayedScreen extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
-                  child: Image.network(song.coverUrl, width: 56, height: 56, fit: BoxFit.cover),
+                  child: ImageHelper.imageWidget(song.coverUrl, width: 56, height: 56, fit: BoxFit.cover),
                 ),
                 title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(song.artist),

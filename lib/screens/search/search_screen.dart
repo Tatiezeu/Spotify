@@ -1,24 +1,21 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
-import '../../core/constants/app_text_styles.dart';
 import '../playlist/playlist_screen.dart';
 import '../player/now_playing_screen.dart';
 import '../playlist/create_playlist_screen.dart';
 import '../artist/artist_screen.dart';
 import '../album/album_screen.dart';
-import '../home/recently_played_screen.dart';
 import '../../services/api_service.dart';
 import '../../models/song.dart';
 import 'package:provider/provider.dart';
 import '../../providers/player_provider.dart';
 import 'dart:async';
-import 'dart:io';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/profile_avatar.dart';
 import '../../models/playlist.dart';
 import '../../utils/song_options_helper.dart';
+import '../../utils/image_helper.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -31,16 +28,72 @@ class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   bool _isLoading = false;
+  bool _hasSubmitted = false;
   List<Song> _searchResults = [];
+  List<Map<String, dynamic>> _suggestions = [];
   Timer? _debounce;
-  final List<String> _searchFilters = ['All', 'Music', 'Podcasts & Shows', 'Artists', 'Playlists', 'Albums'];
+  final List<String> _searchFilters = ['All', 'Songs', 'Podcasts & Shows', 'Artists', 'Playlists', 'Albums'];
   String _activeFilter = 'All';
   List<String> _recentSearches = [];
+  
+  // Adapting placeholder text list that cycles to encourage user exploration
+  final List<String> _placeholders = [
+    'What do you want to listen to?',
+    'Songs, artists, or albums...',
+    'Explore new genres and mixes...',
+    'Afrobeats, Pop, Hip-Hop...',
+    'What is your vibe today?',
+  ];
+  int _placeholderIndex = 0;
+  Timer? _placeholderTimer;
+
+  // Trending search suggestions that trigger query execution on tap
+  final List<String> _trendingSearches = [
+    'Taylor Swift',
+    'Afrobeats',
+    'Lofi Sleep',
+    'Chill Vibes',
+    'Gym Workout',
+    'Daily Mix 2026'
+  ];
+
+  // Curated horizontal cards mapping personalized mix recommendations
+  final List<Map<String, String>> _mockRecommendations = [
+    {
+      'title': 'Discover Weekly',
+      'desc': 'Your weekly mixtape of fresh vibes.',
+      'coverUrl': 'https://picsum.photos/300/300?random=200',
+      'color': '0xFF3E3264',
+    },
+    {
+      'title': 'Release Radar',
+      'desc': 'Catch all the newest releases.',
+      'coverUrl': 'https://picsum.photos/300/300?random=201',
+      'color': '0xFF1E3264',
+    },
+    {
+      'title': 'Daily Mix 1',
+      'desc': 'Dadju, Tayc, and more.',
+      'coverUrl': 'https://picsum.photos/300/300?random=202',
+      'color': '0xFF474747',
+    },
+  ];
 
   @override
   void initState() {
     super.initState();
     _loadSearchHistory();
+    _startPlaceholderAnimation();
+  }
+
+  void _startPlaceholderAnimation() {
+    _placeholderTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
+      if (mounted && !_isSearching && _searchController.text.isEmpty) {
+        setState(() {
+          _placeholderIndex = (_placeholderIndex + 1) % _placeholders.length;
+        });
+      }
+    });
   }
 
   Future<void> _loadSearchHistory() async {
@@ -57,6 +110,14 @@ class _SearchScreenState extends State<SearchScreen> {
       await ApiService().updateProfileImage(pickedFile.path);
       setState(() {}); // Trigger rebuild to show new image in ProfileAvatar
     }
+  }
+
+  void _showCodeScanner() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) => const _SportifyCodeScannerDialog(),
+    );
   }
 
 
@@ -83,6 +144,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void dispose() {
     _searchController.dispose();
     _debounce?.cancel();
+    _placeholderTimer?.cancel();
     super.dispose();
   }
   @override
@@ -130,12 +192,18 @@ class _SearchScreenState extends State<SearchScreen> {
                     _buildSearchBar(),
                     if (_isSearching) ...[
                       const SizedBox(height: 16),
-                      _buildSearchFilters(),
-                      const SizedBox(height: 24),
-                      _buildSearchResults(),
+                      if (!_hasSubmitted) ...[
+                        _buildSuggestionsDropdown(),
+                      ] else ...[
+                        _buildSearchFilters(),
+                        const SizedBox(height: 24),
+                        _buildSearchResults(),
+                      ],
                     ] else ...[
                       const SizedBox(height: 24),
                       if (_recentSearches.isNotEmpty) _buildSearchHistory(),
+                      _buildTrendingSearches(),
+                      _buildRecommendations(),
                       const Text(
                         'Discover something new',
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -199,9 +267,11 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  // Filters tab row above search results to restrict categories and re-rank results
   Widget _buildSearchFilters() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
       child: Row(
         children: _searchFilters.map((filter) {
           final isSelected = _activeFilter == filter;
@@ -209,20 +279,9 @@ class _SearchScreenState extends State<SearchScreen> {
             onTap: () {
               setState(() {
                 _activeFilter = filter;
-                if (_searchController.text.isNotEmpty) {
-                  _isLoading = true;
-                }
               });
               if (_searchController.text.isNotEmpty) {
-                // Trigger immediate search with new filter
-                String searchType = 'track';
-                if (filter == 'Artists') searchType = 'artist';
-                if (filter == 'Albums') searchType = 'album';
-                if (filter == 'All') searchType = 'track,artist,album';
-                
-                ApiService().searchSpotify(_searchController.text, type: searchType).then((res) {
-                  if (mounted) setState(() { _searchResults = res; _isLoading = false; });
-                });
+                _performSearch(_searchController.text);
               }
             },
             child: Container(
@@ -252,50 +311,60 @@ class _SearchScreenState extends State<SearchScreen> {
       return const Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen));
     }
     
-    if (_searchResults.isEmpty) {
+    final ranked = _rankResults(_searchResults, _activeFilter);
+
+    if (ranked.isEmpty) {
       return const Center(child: Text('No results found.', style: TextStyle(color: AppColors.secondaryText)));
     }
-
-    final tracks = _searchResults.where((s) => s.type == 'track').toList();
-    final artists = _searchResults.where((s) => s.type == 'artist').toList();
-    final albums = _searchResults.where((s) => s.type == 'album').toList();
+    
+    final tracks = ranked.where((s) => s.type == 'track').toList();
+    final artists = ranked.where((s) => s.type == 'artist').toList();
+    final albums = ranked.where((s) => s.type == 'album').toList();
+    final podcasts = ranked.where((s) => s.type == 'podcast').toList();
+    final playlists = ranked.where((s) => s.type == 'playlist').toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_activeFilter == 'All' && _searchResults.isNotEmpty) ...[
+        if (_activeFilter == 'All' && ranked.isNotEmpty) ...[
           const Text('Top result', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          _buildTopResult(_searchResults.first),
+          _buildTopResult(ranked.first),
           const SizedBox(height: 32),
         ],
 
         if (artists.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Artists')) ...[
           const Text('Artists', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          ...artists.map((artist) => _buildArtistTile(artist)).toList(),
+          ...artists.map((artist) => _buildArtistTile(artist)),
           const SizedBox(height: 24),
         ],
 
-        if (tracks.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Music' || _activeFilter == 'Songs')) ...[
+        if (tracks.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Songs')) ...[
           const Text('Songs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          ...tracks.map((song) => _buildTrackTile(song)).toList(),
+          ...tracks.map((song) => _buildTrackTile(song)),
           const SizedBox(height: 24),
         ],
 
         if (albums.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Albums')) ...[
           const Text('Albums', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          ...albums.map((album) => _buildAlbumTile(album)).toList(),
+          ...albums.map((album) => _buildAlbumTile(album)),
           const SizedBox(height: 24),
         ],
         
-        // Handle playlists if any (currently playlists are often returned as albums or special types)
-        if (_activeFilter == 'Playlists') ...[
+        if (podcasts.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Podcasts & Shows')) ...[
+          const Text('Podcasts & Shows', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          ...podcasts.map((podcast) => _buildPodcastTile(podcast)),
+          const SizedBox(height: 24),
+        ],
+        
+        if (playlists.isNotEmpty && (_activeFilter == 'All' || _activeFilter == 'Playlists')) ...[
           const Text('Playlists', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          ..._searchResults.where((s) => s.type == 'playlist').map((p) => _buildAlbumTile(p)).toList(),
+          ...playlists.map((playlist) => _buildAlbumTile(playlist)),
           const SizedBox(height: 24),
         ],
       ],
@@ -326,7 +395,7 @@ class _SearchScreenState extends State<SearchScreen> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(isArtist ? 40 : 4),
-              child: Image.network(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
+              child: ImageHelper.imageWidget(topResult.coverUrl, width: 80, height: 80, fit: BoxFit.cover),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -352,7 +421,7 @@ class _SearchScreenState extends State<SearchScreen> {
       contentPadding: EdgeInsets.zero,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(24),
-        child: Image.network(artist.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+        child: ImageHelper.imageWidget(artist.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
       ),
       title: Text(artist.artist, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1),
       subtitle: const Text('Artist'),
@@ -365,7 +434,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildAlbumTile(Song album) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Image.network(album.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+      leading: ImageHelper.imageWidget(album.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
       title: Text(album.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1),
       subtitle: Text('Album • ${album.artist}'),
       onTap: () {
@@ -382,9 +451,9 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildTrackTile(Song song) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Image.network(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+      leading: ImageHelper.imageWidget(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
       title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(song.artist),
+      subtitle: Text(song.artist, style: const TextStyle(color: AppColors.secondaryText, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
       trailing: SizedBox(
         width: 70,
         child: Row(
@@ -393,19 +462,32 @@ class _SearchScreenState extends State<SearchScreen> {
             Consumer<PlayerProvider>(
               builder: (context, player, child) {
                 final isLiked = player.isLiked(song.id);
-                return IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  icon: Icon(isLiked ? Icons.favorite : Icons.favorite_border, color: isLiked ? AppColors.spotifyGreen : AppColors.secondaryText, size: 20),
-                  onPressed: () => player.toggleLike(song),
+                return GestureDetector(
+                  onTap: () => player.toggleLike(song),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    child: Icon(
+                      isLiked ? Icons.favorite : Icons.favorite_border,
+                      color: isLiked ? AppColors.spotifyGreen : AppColors.secondaryText,
+                      size: 20,
+                    ),
+                  ),
                 );
               },
             ),
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              icon: const Icon(Icons.more_vert, color: AppColors.secondaryText, size: 20),
-              onPressed: () => _showSongOptions(context, song),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _showSongOptions(context, song),
+              behavior: HitTestBehavior.opaque,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                child: Icon(
+                  Icons.more_vert,
+                  color: AppColors.secondaryText,
+                  size: 20,
+                ),
+              ),
             ),
           ],
         ),
@@ -421,13 +503,11 @@ class _SearchScreenState extends State<SearchScreen> {
     SongOptionsHelper.showSongOptions(context, song);
   }
 
-  void _showPlaylistPicker(BuildContext context, Song song) {
-    SongOptionsHelper.showPlaylistPicker(context, song);
-  }
 
 
 
-
+  // Prominent query search bar that matches typing queries and dynamically swaps
+  // suffix actions between cancel/clear and camera/scanning icons.
   Widget _buildSearchBar() {
     return Container(
       width: double.infinity,
@@ -443,31 +523,21 @@ class _SearchScreenState extends State<SearchScreen> {
           setState(() {
             _isSearching = value.isNotEmpty;
             _isLoading = value.isNotEmpty;
+            _hasSubmitted = false; // Show suggestions overlay while typing
           });
           
+          if (value.isNotEmpty) {
+            _updateSuggestions(value);
+          } else {
+            setState(() {
+              _suggestions = [];
+            });
+          }
+          
           if (_debounce?.isActive ?? false) _debounce!.cancel();
-          _debounce = Timer(const Duration(milliseconds: 500), () async {
+          _debounce = Timer(const Duration(milliseconds: 500), () {
             if (value.isNotEmpty) {
-              String searchType = 'track';
-              if (_activeFilter == 'Artists') searchType = 'artist';
-              if (_activeFilter == 'Albums') searchType = 'album';
-              if (_activeFilter == 'All') searchType = 'track,artist,album';
-              
-              final spotifyFuture = ApiService().searchSpotify(value, type: searchType).catchError((e) => <Song>[]);
-              final deezerFuture = ApiService().searchDeezer(value).catchError((e) => <Song>[]);
-
-              final results = await Future.wait([spotifyFuture, deezerFuture]);
-              final combinedResults = [...results[0], ...results[1]];
-              
-              if (mounted) {
-                setState(() {
-                  _searchResults = combinedResults;
-                  _isLoading = false;
-                });
-                if (combinedResults.isNotEmpty) {
-                  _saveSearchHistory(value);
-                }
-              }
+              _performSearch(value);
             } else {
               if (mounted) {
                 setState(() {
@@ -478,26 +548,546 @@ class _SearchScreenState extends State<SearchScreen> {
             }
           });
         },
+        onSubmitted: (value) {
+          if (value.isNotEmpty) {
+            setState(() {
+              _isSearching = true;
+              _hasSubmitted = true;
+              _isLoading = true;
+            });
+            _performSearch(value);
+          }
+        },
         style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15),
         decoration: InputDecoration(
           filled: true,
           fillColor: Colors.white,
           prefixIcon: const Icon(Icons.search, color: Colors.black, size: 28),
-          hintText: 'What do you want to listen to?',
+          hintText: _placeholders[_placeholderIndex],
           hintStyle: TextStyle(color: Colors.black.withOpacity(0.7), fontWeight: FontWeight.w500, fontSize: 15),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 14),
-          suffixIcon: _isSearching ? IconButton(
-            icon: const Icon(Icons.close, color: Colors.black, size: 24),
-            onPressed: () {
-              _searchController.clear();
-              setState(() {
-                _isSearching = false;
-              });
-            },
-          ) : null,
+          suffixIcon: _isSearching 
+              ? IconButton(
+                  icon: const Icon(Icons.close, color: Colors.black, size: 24),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {
+                      _isSearching = false;
+                      _hasSubmitted = false;
+                      _searchResults = [];
+                      _suggestions = [];
+                    });
+                  },
+                )
+              : IconButton(
+                  icon: const Icon(Icons.camera_alt_outlined, color: Colors.black54, size: 24),
+                  onPressed: _showCodeScanner, // Open modern Sportify code scanning mockup
+                ),
         ),
       ),
+    );
+  }
+
+  // Generates real-time suggestions by blending lexical matching with user-history and trending signals
+  void _updateSuggestions(String query) {
+    if (query.trim().isEmpty) {
+      setState(() {
+        _suggestions = [];
+      });
+      return;
+    }
+    
+    final lowerQuery = query.toLowerCase().trim();
+    final List<Map<String, dynamic>> candidates = [];
+    
+    // 1. User History Matches (from PlayerProvider history and liked songs)
+    final history = context.read<PlayerProvider>().history;
+    final liked = context.read<PlayerProvider>().likedSongs;
+    
+    for (var song in history) {
+      if (song.title.toLowerCase().contains(lowerQuery) || song.artist.toLowerCase().contains(lowerQuery)) {
+        candidates.add({
+          'title': song.title,
+          'subtitle': 'Song • ${song.artist} (From history)',
+          'type': 'history',
+          'song': song,
+          'score': 100.0,
+        });
+      }
+    }
+    
+    for (var song in liked) {
+      if (song.title.toLowerCase().contains(lowerQuery) || song.artist.toLowerCase().contains(lowerQuery)) {
+        if (!candidates.any((c) => c['song']?.id == song.id)) {
+          candidates.add({
+            'title': song.title,
+            'subtitle': 'Liked Song • ${song.artist}',
+            'type': 'liked',
+            'song': song,
+            'score': 90.0,
+          });
+        }
+      }
+    }
+    
+    // 2. Regional / Trending Matches (combines popularity + regional weights)
+    final trendingSongs = [
+      {'title': 'Anti-Hero', 'artist': 'Taylor Swift', 'genre': 'Pop', 'popularity': 95},
+      {'title': 'Last Last', 'artist': 'Burna Boy', 'genre': 'Afrobeats', 'popularity': 92},
+      {'title': 'Calm Down', 'artist': 'Rema', 'genre': 'Afrobeats', 'popularity': 90},
+      {'title': 'Starboy', 'artist': 'The Weeknd', 'genre': 'Pop', 'popularity': 88},
+      {'title': 'Mockingbird', 'artist': 'Eminem', 'genre': 'Hip-Hop', 'popularity': 85},
+    ];
+    
+    for (var ts in trendingSongs) {
+      final tTitle = ts['title'] as String;
+      final tArtist = ts['artist'] as String;
+      if (tTitle.toLowerCase().contains(lowerQuery) || tArtist.toLowerCase().contains(lowerQuery)) {
+        double score = (ts['popularity'] as int).toDouble();
+        if (ts['genre'] == 'Afrobeats') {
+          score += 15.0; // Boost regional Afrobeats trending weight
+        }
+        
+        if (!candidates.any((c) => c['title'].toLowerCase() == tTitle.toLowerCase())) {
+          candidates.add({
+            'title': tTitle,
+            'subtitle': 'Trending in your Region • $tArtist',
+            'type': 'trending',
+            'song': Song(
+              id: 'trending_${tTitle.hashCode}',
+              title: tTitle,
+              artist: tArtist,
+              albumId: '',
+              albumName: 'Single',
+              coverUrl: 'https://picsum.photos/150/150?random=${tTitle.hashCode.abs() % 100}',
+              duration: const Duration(minutes: 3),
+              artistId: '',
+              previewUrl: '',
+              type: 'track',
+            ),
+            'score': score,
+          });
+        }
+      }
+    }
+
+    // 3. Common Search Autocomplete Intents
+    final autocompleteSuggestions = [
+      'Taylor Swift hits',
+      'Afrobeats Mix 2026',
+      'Lofi Sleep Chillout',
+      'Gym Workout hip hop',
+      'Chill vibes playlist',
+    ];
+    for (var sug in autocompleteSuggestions) {
+      if (sug.toLowerCase().contains(lowerQuery)) {
+        candidates.add({
+          'title': sug,
+          'subtitle': 'Search intent',
+          'type': 'intent',
+          'score': 50.0,
+        });
+      }
+    }
+    
+    // Sort combined suggestion candidates by hybrid score descending
+    candidates.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+    
+    setState(() {
+      _suggestions = candidates.take(6).toList();
+    });
+  }
+
+  // Renders the real-time suggestions drop down list
+  Widget _buildSuggestionsDropdown() {
+    if (_suggestions.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32.0),
+        child: Center(
+          child: Text(
+            'Keep typing to see suggestions...',
+            style: TextStyle(color: Colors.white38, fontSize: 14),
+          ),
+        ),
+      );
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 4, bottom: 12),
+          child: Text(
+            'Search Suggestions',
+            style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+        ),
+        ..._suggestions.map((sug) {
+          IconData icon;
+          Color iconColor;
+          switch (sug['type']) {
+            case 'history':
+              icon = Icons.history;
+              iconColor = AppColors.spotifyGreen;
+              break;
+            case 'liked':
+              icon = Icons.favorite;
+              iconColor = AppColors.spotifyGreen;
+              break;
+            case 'trending':
+              icon = Icons.trending_up;
+              iconColor = Colors.orangeAccent;
+              break;
+            default:
+              icon = Icons.search;
+              iconColor = Colors.white54;
+          }
+          
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListTile(
+              leading: Icon(icon, color: iconColor, size: 20),
+              title: Text(
+                sug['title'],
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14),
+              ),
+              subtitle: Text(
+                sug['subtitle'],
+                style: const TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+              trailing: const Icon(Icons.north_west, color: Colors.white30, size: 16),
+              onTap: () {
+                _searchController.text = sug['title'];
+                _searchController.selection = TextSelection.fromPosition(TextPosition(offset: _searchController.text.length));
+                setState(() {
+                  _isSearching = true;
+                  _hasSubmitted = true;
+                  _isLoading = true;
+                });
+                _performSearch(sug['title']);
+              },
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  // Ranks the search results using a hybrid scoring algorithm combining lexical and behavioral signals
+  List<Song> _rankResults(List<Song> results, String filter) {
+    if (results.isEmpty) return [];
+    
+    final query = _searchController.text.toLowerCase().trim();
+    final player = context.read<PlayerProvider>();
+    final history = player.history;
+    final liked = player.likedSongs;
+
+    // First, filter candidate matches strictly by category if tab is selected
+    List<Song> filtered = [];
+    if (filter == 'All') {
+      filtered = List.from(results);
+    } else if (filter == 'Songs') {
+      filtered = results.where((s) => s.type == 'track').toList();
+    } else if (filter == 'Artists') {
+      filtered = results.where((s) => s.type == 'artist').toList();
+    } else if (filter == 'Albums') {
+      filtered = results.where((s) => s.type == 'album').toList();
+    } else if (filter == 'Playlists') {
+      filtered = results.where((s) => s.type == 'playlist').toList();
+    } else if (filter == 'Podcasts & Shows') {
+      filtered = results.where((s) => s.type == 'podcast').toList();
+    }
+
+    // Score and rank candidates based on multiple signals
+    final List<Map<String, dynamic>> scored = filtered.map((song) {
+      double score = 0;
+      
+      final title = song.title.toLowerCase();
+      final artist = song.artist.toLowerCase();
+
+      // 1. Lexical Matching Weights
+      if (title == query || artist == query) {
+        score += 100.0; // Exact match bonus
+      } else if (title.startsWith(query) || artist.startsWith(query)) {
+        score += 50.0; // Phrase starts-with bonus
+      } else if (title.contains(query) || artist.contains(query)) {
+        score += 25.0; // Substring keyword match
+      }
+
+      // 2. Behavioral/Personal taste profile boost
+      bool artistPlayedBefore = history.any((s) => s.artist.toLowerCase() == artist);
+      bool songPlayedBefore = history.any((s) => s.id == song.id);
+      bool isLikedTrack = liked.any((s) => s.id == song.id);
+
+      if (songPlayedBefore) score += 40.0;
+      if (artistPlayedBefore) score += 20.0;
+      if (isLikedTrack) score += 30.0;
+
+      // 3. Global Popularity mock weight
+      double globalPopularity = 50.0;
+      if (song.id.startsWith('trending_')) {
+        globalPopularity = 90.0;
+      } else {
+        globalPopularity = (song.title.length % 5) * 10.0 + 50.0;
+      }
+      score += globalPopularity * 0.2;
+
+      // 4. Behavioral Skip Rate Discount
+      final int hash = song.id.hashCode.abs();
+      final double mockSkipRate = (hash % 100) / 100.0;
+      score -= (mockSkipRate * 15.0);
+
+      return {
+        'song': song,
+        'score': score,
+      };
+    }).toList();
+
+    // Sort descending by relevance score
+    scored.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+    return scored.map((item) => item['song'] as Song).toList();
+  }
+
+  // Triggers the hybrid search logic. 
+  // Lexical search (via API matching what was typed) is executed asynchronously,
+  // and we overlay mock podcasts for podcasts & shows category matches.
+  Future<void> _performSearch(String query) async {
+    if (query.isEmpty) return;
+    setState(() => _isLoading = true);
+    
+    String searchType = 'track';
+    if (_activeFilter == 'Artists') searchType = 'artist';
+    if (_activeFilter == 'Albums') searchType = 'album';
+    if (_activeFilter == 'Playlists') searchType = 'playlist';
+    if (_activeFilter == 'Podcasts & Shows') searchType = 'show';
+    if (_activeFilter == 'All') searchType = 'track,artist,album';
+
+    try {
+      final spotifyFuture = ApiService().searchSpotify(query, type: searchType).catchError((e) => <Song>[]);
+      final deezerFuture = ApiService().searchDeezer(query).catchError((e) => <Song>[]);
+
+      final results = await Future.wait([spotifyFuture, deezerFuture]);
+      final combinedResults = [...results[0], ...results[1]];
+      
+      // Inject mock podcasts if current filter matches
+      if (_activeFilter == 'All' || _activeFilter == 'Podcasts & Shows') {
+        final mockPodcasts = _getMockPodcasts(query);
+        combinedResults.addAll(mockPodcasts);
+      }
+
+      if (mounted) {
+        setState(() {
+          _searchResults = combinedResults;
+          _isLoading = false;
+        });
+        _saveSearchHistory(query);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // Generates high-fidelity mock podcasts matching lexical input
+  List<Song> _getMockPodcasts(String query) {
+    final lowerQuery = query.toLowerCase();
+    final List<Map<String, String>> allMock = [
+      {
+        'id': 'podcast_rogan',
+        'title': 'The Joe Rogan Experience',
+        'artist': 'Joe Rogan',
+        'coverUrl': 'https://picsum.photos/150/150?random=100',
+      },
+      {
+        'id': 'podcast_lex',
+        'title': 'Lex Fridman Podcast',
+        'artist': 'Lex Fridman',
+        'coverUrl': 'https://picsum.photos/150/150?random=101',
+      },
+      {
+        'id': 'podcast_huberman',
+        'title': 'Huberman Lab',
+        'artist': 'Dr. Andrew Huberman',
+        'coverUrl': 'https://picsum.photos/150/150?random=102',
+      },
+      {
+        'id': 'podcast_daily',
+        'title': 'The Daily',
+        'artist': 'The New York Times',
+        'coverUrl': 'https://picsum.photos/150/150?random=103',
+      }
+    ];
+
+    return allMock
+        .where((p) => p['title']!.toLowerCase().contains(lowerQuery) || p['artist']!.toLowerCase().contains(lowerQuery))
+        .map((p) => Song(
+              id: p['id']!,
+              title: p['title']!,
+              artist: p['artist']!,
+              albumId: '',
+              albumName: 'Podcast',
+              coverUrl: p['coverUrl']!,
+              duration: const Duration(minutes: 45),
+              artistId: '',
+              previewUrl: '',
+              type: 'podcast',
+            ))
+        .toList();
+  }
+
+  // Renders trending search suggestion wrap chips
+  Widget _buildTrendingSearches() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Trending searches',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _trendingSearches.map((tag) => InkWell(
+            onTap: () {
+              _searchController.text = tag;
+              setState(() {
+                _isSearching = true;
+                _isLoading = true;
+              });
+              _performSearch(tag);
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+               decoration: BoxDecoration(
+                 color: Colors.white.withOpacity(0.08),
+                 borderRadius: BorderRadius.circular(20),
+                 border: Border.all(color: Colors.white.withOpacity(0.12)),
+               ),
+              child: Text(
+                tag,
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+          )).toList(),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // Renders horizontal personalized recommended mix cards
+  Widget _buildRecommendations() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Recommended for you',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 140,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: _mockRecommendations.length,
+            itemBuilder: (context, index) {
+              final item = _mockRecommendations[index];
+              final colorHex = int.parse(item['color']!);
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PlaylistScreen(
+                        title: item['title']!,
+                        playlistId: 'playlist_rec_$index',
+                      ),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 240,
+                  margin: const EdgeInsets.only(right: 16),
+                  decoration: BoxDecoration(
+                    color: Color(colorHex).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withOpacity(0.08)),
+                  ),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                        child: ImageHelper.imageWidget(
+                          item['coverUrl']!,
+                          width: 100,
+                          height: 140,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                item['title']!,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                item['desc']!,
+                                style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                       ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 28),
+      ],
+    );
+  }
+
+  // Renders a podcast tile
+  Widget _buildPodcastTile(Song podcast) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: ImageHelper.imageWidget(podcast.coverUrl, width: 52, height: 52, fit: BoxFit.cover),
+      ),
+      title: Text(podcast.title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text('${podcast.artist} • Podcast', style: const TextStyle(color: AppColors.secondaryText, fontSize: 13)),
+      onTap: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Streaming "${podcast.title}" trailer...'),
+            backgroundColor: AppColors.spotifyGreen,
+          ),
+        );
+      },
     );
   }
 
@@ -531,13 +1121,10 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
           onTap: () {
             _searchController.text = query;
-            setState(() { _isSearching = true; _isLoading = true; });
-            Future.wait([
-              ApiService().searchSpotify(query, type: 'track,artist,album'),
-              ApiService().searchDeezer(query)
-            ]).then((res) {
-              if (mounted) setState(() { _searchResults = [...res[0], ...res[1]]; _isLoading = false; });
+            setState(() { 
+              _isSearching = true;
             });
+            _performSearch(query);
           },
         )),
         const SizedBox(height: 24),
@@ -576,7 +1163,7 @@ class _SearchScreenState extends State<SearchScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
           image: DecorationImage(
-            image: NetworkImage(imageUrl),
+            image: ImageHelper.getImageProvider(imageUrl) ?? const NetworkImage('https://via.placeholder.com/150'),
             fit: BoxFit.cover,
             colorFilter: ColorFilter.mode(
               Colors.black.withOpacity(0.3),
@@ -612,16 +1199,16 @@ class _SearchScreenState extends State<SearchScreen> {
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
       children: [
-        _buildCategoryCard('Podcasts', const Color(0xFF27856A), 'https://picsum.photos/100?1'),
-        _buildCategoryCard('Live Events', const Color(0xFF8471F2), 'https://picsum.photos/100?2'),
-        _buildCategoryCard('Made For You', const Color(0xFF1E3264), 'https://picsum.photos/100?3'),
-        _buildCategoryCard('New Releases', const Color(0xFFE8115B), 'https://picsum.photos/100?4'),
-        _buildCategoryCard('Hindi', const Color(0xFFE13300), 'https://picsum.photos/100?5'),
-        _buildCategoryCard('Punjabi', const Color(0xFFB02897), 'https://picsum.photos/100?6'),
-        _buildCategoryCard('Tamil', const Color(0xFFA56752), 'https://picsum.photos/100?7'),
-        _buildCategoryCard('Telugu', const Color(0xFFD84000), 'https://picsum.photos/100?8'),
-        _buildCategoryCard('Charts', const Color(0xFF8D67AB), 'https://picsum.photos/100?9'),
         _buildCategoryCard('Pop', const Color(0xFF148A08), 'https://picsum.photos/100?10'),
+        _buildCategoryCard('Afrobeats', const Color(0xFFD84000), 'https://picsum.photos/100?8'),
+        _buildCategoryCard('Hip-Hop', const Color(0xFFE8115B), 'https://picsum.photos/100?4'),
+        _buildCategoryCard('Rock', const Color(0xFFE13300), 'https://picsum.photos/100?5'),
+        _buildCategoryCard('Lofi', const Color(0xFF27856A), 'https://picsum.photos/100?1'),
+        _buildCategoryCard('Electronic', const Color(0xFF8471F2), 'https://picsum.photos/100?2'),
+        _buildCategoryCard('Podcasts', const Color(0xFF1E3264), 'https://picsum.photos/100?3'),
+        _buildCategoryCard('Live Events', const Color(0xFF8D67AB), 'https://picsum.photos/100?9'),
+        _buildCategoryCard('Made For You', const Color(0xFFB02897), 'https://picsum.photos/100?6'),
+        _buildCategoryCard('New Releases', const Color(0xFFA56752), 'https://picsum.photos/100?7'),
       ],
     );
   }
@@ -673,7 +1260,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       ),
                     ],
                     image: DecorationImage(
-                      image: NetworkImage(imageUrl),
+                      image: ImageHelper.getImageProvider(imageUrl) ?? const NetworkImage('https://via.placeholder.com/150'),
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -789,7 +1376,7 @@ class DiscoveryDetailScreen extends StatelessWidget {
                 BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 40, spreadRadius: 10),
               ],
             ),
-            child: Image.network(imageUrl, fit: BoxFit.cover),
+            child: ImageHelper.imageWidget(imageUrl, fit: BoxFit.cover),
           ),
         ],
       ),
@@ -844,7 +1431,7 @@ class DiscoveryDetailScreen extends StatelessWidget {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
-                  child: Image.network(imageUrl, width: 48, height: 48, fit: BoxFit.cover),
+                  child: ImageHelper.imageWidget(imageUrl, width: 48, height: 48, fit: BoxFit.cover),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -873,6 +1460,89 @@ class DiscoveryDetailScreen extends StatelessWidget {
   }
 }
 
+class _GenreHubData {
+  final List<Map<String, String>> playlists;
+  final List<Song> topTracks;
+  final List<Map<String, String>> artists;
+
+  _GenreHubData({required this.playlists, required this.topTracks, required this.artists});
+
+  factory _GenreHubData.getForGenre(String genre) {
+    final cleanGenre = genre.trim();
+    if (cleanGenre == 'Pop') {
+      return _GenreHubData(
+        playlists: [
+          {'title': 'Today\'s Top Hits', 'coverUrl': 'https://picsum.photos/300/300?random=11'},
+          {'title': 'Pop Rising', 'coverUrl': 'https://picsum.photos/300/300?random=12'},
+          {'title': 'Pop Chill', 'coverUrl': 'https://picsum.photos/300/300?random=13'},
+        ],
+        topTracks: [
+          Song(id: 'pop_track_1', title: 'Anti-Hero', artist: 'Taylor Swift', albumId: 'pop_alb_1', albumName: 'Midnights', coverUrl: 'https://picsum.photos/150/150?random=14', duration: const Duration(minutes: 3, seconds: 20), artistId: 'artist_swift', previewUrl: '', type: 'track'),
+          Song(id: 'pop_track_2', title: 'Starboy', artist: 'The Weeknd', albumId: 'pop_alb_2', albumName: 'Starboy', coverUrl: 'https://picsum.photos/150/150?random=15', duration: const Duration(minutes: 3, seconds: 50), artistId: 'artist_weeknd', previewUrl: '', type: 'track'),
+          Song(id: 'pop_track_3', title: 'Flowers', artist: 'Miley Cyrus', albumId: 'pop_alb_3', albumName: 'Endless Summer Vacation', coverUrl: 'https://picsum.photos/150/150?random=16', duration: const Duration(minutes: 3, seconds: 20), artistId: 'artist_cyrus', previewUrl: '', type: 'track'),
+        ],
+        artists: [
+          {'name': 'Taylor Swift', 'avatarUrl': 'https://picsum.photos/150/150?random=17', 'id': 'artist_swift'},
+          {'name': 'The Weeknd', 'avatarUrl': 'https://picsum.photos/150/150?random=18', 'id': 'artist_weeknd'},
+          {'name': 'Miley Cyrus', 'avatarUrl': 'https://picsum.photos/150/150?random=19', 'id': 'artist_cyrus'},
+        ],
+      );
+    } else if (cleanGenre == 'Afrobeats') {
+      return _GenreHubData(
+        playlists: [
+          {'title': 'Afrobeats Essentials', 'coverUrl': 'https://picsum.photos/300/300?random=21'},
+          {'title': 'African Heat', 'coverUrl': 'https://picsum.photos/300/300?random=22'},
+          {'title': 'Amapiano Grooves', 'coverUrl': 'https://picsum.photos/300/300?random=23'},
+        ],
+        topTracks: [
+          Song(id: 'afro_track_1', title: 'Last Last', artist: 'Burna Boy', albumId: 'afro_alb_1', albumName: 'Love, Damini', coverUrl: 'https://picsum.photos/150/150?random=24', duration: const Duration(minutes: 2, seconds: 52), artistId: 'artist_burna', previewUrl: '', type: 'track'),
+          Song(id: 'afro_track_2', title: 'Calm Down', artist: 'Rema', albumId: 'afro_alb_2', albumName: 'Rave & Roses', coverUrl: 'https://picsum.photos/150/150?random=25', duration: const Duration(minutes: 3, seconds: 39), artistId: 'artist_rema', previewUrl: '', type: 'track'),
+          Song(id: 'afro_track_3', title: 'Essence', artist: 'Wizkid', albumId: 'afro_alb_3', albumName: 'Made in Lagos', coverUrl: 'https://picsum.photos/150/150?random=26', duration: const Duration(minutes: 4, seconds: 08), artistId: 'artist_wizkid', previewUrl: '', type: 'track'),
+        ],
+        artists: [
+          {'name': 'Burna Boy', 'avatarUrl': 'https://picsum.photos/150/150?random=27', 'id': 'artist_burna'},
+          {'name': 'Rema', 'avatarUrl': 'https://picsum.photos/150/150?random=28', 'id': 'artist_rema'},
+          {'name': 'Wizkid', 'avatarUrl': 'https://picsum.photos/150/150?random=29', 'id': 'artist_wizkid'},
+        ],
+      );
+    } else if (cleanGenre == 'Hip-Hop') {
+      return _GenreHubData(
+        playlists: [
+          {'title': 'RapCaviar', 'coverUrl': 'https://picsum.photos/300/300?random=31'},
+          {'title': 'Realest Rap', 'coverUrl': 'https://picsum.photos/300/300?random=32'},
+          {'title': 'Gold School', 'coverUrl': 'https://picsum.photos/300/300?random=33'},
+        ],
+        topTracks: [
+          Song(id: 'hip_track_1', title: 'Mockingbird', artist: 'Eminem', albumId: 'hip_alb_1', albumName: 'Encore', coverUrl: 'https://picsum.photos/150/150?random=34', duration: const Duration(minutes: 4, seconds: 11), artistId: 'artist_eminem', previewUrl: '', type: 'track'),
+          Song(id: 'hip_track_2', title: 'God\'s Plan', artist: 'Drake', albumId: 'hip_alb_2', albumName: 'Scorpion', coverUrl: 'https://picsum.photos/150/150?random=35', duration: const Duration(minutes: 3, seconds: 18), artistId: 'artist_drake', previewUrl: '', type: 'track'),
+          Song(id: 'hip_track_3', title: 'HUMBLE.', artist: 'Kendrick Lamar', albumId: 'hip_alb_3', albumName: 'DAMN.', coverUrl: 'https://picsum.photos/150/150?random=36', duration: const Duration(minutes: 2, seconds: 57), artistId: 'artist_kendrick', previewUrl: '', type: 'track'),
+        ],
+        artists: [
+          {'name': 'Eminem', 'avatarUrl': 'https://picsum.photos/150/150?random=37', 'id': 'artist_eminem'},
+          {'name': 'Drake', 'avatarUrl': 'https://picsum.photos/150/150?random=38', 'id': 'artist_drake'},
+          {'name': 'Kendrick Lamar', 'avatarUrl': 'https://picsum.photos/150/150?random=39', 'id': 'artist_kendrick'},
+        ],
+      );
+    } else {
+      return _GenreHubData(
+        playlists: [
+          {'title': '$genre Mix', 'coverUrl': 'https://picsum.photos/300/300?random=41'},
+          {'title': 'Best of $genre', 'coverUrl': 'https://picsum.photos/300/300?random=42'},
+          {'title': 'Chill $genre', 'coverUrl': 'https://picsum.photos/300/300?random=43'},
+        ],
+        topTracks: [
+          Song(id: 'gen_track_1', title: '$genre Hits Vol. 1', artist: 'Popular Artist', albumId: 'gen_alb_1', albumName: 'Album Vol 1', coverUrl: 'https://picsum.photos/150/150?random=44', duration: const Duration(minutes: 3, seconds: 15), artistId: 'gen_art_1', previewUrl: '', type: 'track'),
+          Song(id: 'gen_track_2', title: '$genre Sessions', artist: 'Trending Project', albumId: 'gen_alb_2', albumName: 'Sessions Live', coverUrl: 'https://picsum.photos/150/150?random=45', duration: const Duration(minutes: 3, seconds: 45), artistId: 'gen_art_2', previewUrl: '', type: 'track'),
+        ],
+        artists: [
+          {'name': 'Popular Artist', 'avatarUrl': 'https://picsum.photos/150/150?random=46', 'id': 'gen_art_1'},
+          {'name': 'Trending Project', 'avatarUrl': 'https://picsum.photos/150/150?random=47', 'id': 'gen_art_2'},
+        ],
+      );
+    }
+  }
+}
+
 class CategoryDetailScreen extends StatelessWidget {
   final String title;
   final Color color;
@@ -881,70 +1551,183 @@ class CategoryDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hubData = _GenreHubData.getForGenre(title);
+
     return Scaffold(
       backgroundColor: AppColors.primaryBackground,
-      appBar: AppBar(
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: color,
-        elevation: 0,
-      ),
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
         slivers: [
-          SliverToBoxAdapter(
-            child: Container(
-              height: 200,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [color, AppColors.primaryBackground],
+          SliverAppBar(
+            backgroundColor: color,
+            expandedHeight: 180.0,
+            floating: false,
+            pinned: true,
+            flexibleSpace: FlexibleSpaceBar(
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white)),
+              centerTitle: true,
+              background: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [color, AppColors.primaryBackground],
+                  ),
                 ),
-              ),
-              child: Center(
-                child: Text(title, style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900)),
+                child: Center(
+                  child: Opacity(
+                    opacity: 0.1,
+                    child: Text(title, style: const TextStyle(fontSize: 100, fontWeight: FontWeight.w900, color: Colors.white)),
+                  ),
+                ),
               ),
             ),
           ),
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 1.0,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 16,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => PlaylistScreen(title: 'Playlist ${index + 1}'),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.panelBackground,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: Image.network('https://picsum.photos/200?random=$index', fit: BoxFit.cover, width: double.infinity)),
-                          Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text('Playlist ${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Featured Playlists', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 160,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: hubData.playlists.length,
+                      itemBuilder: (context, index) {
+                        final pl = hubData.playlists[index];
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => PlaylistScreen(
+                                  title: pl['title']!,
+                                  playlistId: 'playlist_genre_${title.toLowerCase()}_$index',
+                                ),
+                              ),
+                            );
+                          },
+                          child: Container(
+                            width: 120,
+                            margin: const EdgeInsets.only(right: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: ImageHelper.imageWidget(
+                                    pl['coverUrl']!,
+                                    width: 120,
+                                    height: 120,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  pl['title']!,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
-                childCount: 20,
+                  ),
+                  const SizedBox(height: 32),
+
+                  Text('Top Tracks in $title', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 12),
+                  ...hubData.topTracks.map((song) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.panelBackground,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: ImageHelper.imageWidget(song.coverUrl, width: 48, height: 48, fit: BoxFit.cover),
+                      ),
+                      title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                      subtitle: Text(song.artist, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.play_circle_filled, color: AppColors.spotifyGreen, size: 36),
+                        onPressed: () {
+                          context.read<PlayerProvider>().playSong(song);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => NowPlayingScreen(song: song)),
+                          );
+                        },
+                      ),
+                      onTap: () {
+                        context.read<PlayerProvider>().playSong(song);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => NowPlayingScreen(song: song)),
+                        );
+                      },
+                    ),
+                  )),
+                  const SizedBox(height: 32),
+
+                  const Text('Featured Artists', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 120,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: hubData.artists.length,
+                      itemBuilder: (context, index) {
+                        final art = hubData.artists[index];
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ArtistScreen(
+                                  artistId: art['id']!,
+                                  artistName: art['name']!,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Container(
+                            width: 100,
+                            margin: const EdgeInsets.only(right: 16),
+                            child: Column(
+                              children: [
+                                CircleAvatar(
+                                  radius: 36,
+                                  backgroundImage: ImageHelper.getImageProvider(art['avatarUrl']!),
+                                  backgroundColor: Colors.white12,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  art['name']!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 60),
+                ],
               ),
             ),
           ),
@@ -1023,15 +1806,15 @@ class _PlaylistPickerSheetState extends State<_PlaylistPickerSheet> {
               leading: const Icon(Icons.music_note, color: Colors.white70),
               title: Text(playlist.name),
               onTap: () async {
+                final navigator = Navigator.of(context);
+                final messenger = ScaffoldMessenger.of(context);
                 final success = await ApiService().addTrackToPlaylist(playlist.id, widget.song);
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Failed to add'), backgroundColor: success ? AppColors.spotifyGreen : Colors.red),
-                  );
-                }
+                navigator.pop();
+                messenger.showSnackBar(
+                  SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Failed to add'), backgroundColor: success ? AppColors.spotifyGreen : Colors.red),
+                );
               },
-            )).toList(),
+            )),
           ],
           const SizedBox(height: 32),
         ],
@@ -1050,5 +1833,162 @@ class _PlaylistPickerSheetState extends State<_PlaylistPickerSheet> {
         _PlaylistPickerSheet.show(context, song);
       }
     });
+  }
+}
+
+class _SportifyCodeScannerDialog extends StatefulWidget {
+  const _SportifyCodeScannerDialog();
+
+  @override
+  State<_SportifyCodeScannerDialog> createState() => _SportifyCodeScannerDialogState();
+}
+
+class _SportifyCodeScannerDialogState extends State<_SportifyCodeScannerDialog> with SingleTickerProviderStateMixin {
+  late AnimationController _animController;
+  late Animation<double> _animation;
+  Timer? _scanTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(duration: const Duration(seconds: 2), vsync: this)..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0.0, end: 200.0).animate(_animController);
+
+    _scanTimer = Timer(const Duration(milliseconds: 1800), () async {
+      if (mounted) {
+        Navigator.pop(context); // Close dialog
+        
+        // Mock a successfully scanned song
+        final mockScannedSong = Song(
+          id: 'scanned_track_1',
+          title: 'Last Last',
+          artist: 'Burna Boy',
+          albumId: 'album_burna_1',
+          albumName: 'Love, Damini',
+          coverUrl: 'https://picsum.photos/300/300?random=88',
+          duration: const Duration(minutes: 2, seconds: 52),
+          artistId: 'artist_burna',
+          previewUrl: '',
+          type: 'track',
+        );
+
+        // Play song
+        final player = Provider.of<PlayerProvider>(context, listen: false);
+        player.playSong(mockScannedSong);
+        
+        // Navigate to player screen
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => NowPlayingScreen(song: mockScannedSong)),
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: const [
+                Icon(Icons.qr_code_scanner, color: Colors.black),
+                SizedBox(width: 8),
+                Text('Sportify Code scanned: Burna Boy - Last Last!', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            backgroundColor: AppColors.spotifyGreen,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    _scanTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF121212),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Scan Sportify Code', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white54),
+                  onPressed: () => Navigator.pop(context),
+                )
+              ],
+            ),
+            const SizedBox(height: 20),
+            Stack(
+              children: [
+                Container(
+                  width: 220,
+                  height: 220,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.spotifyGreen.withOpacity(0.4), width: 2),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.camera_alt_outlined, color: Colors.white.withOpacity(0.15), size: 64),
+                        const SizedBox(height: 8),
+                        Text('Initializing camera...', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ),
+                // Scanning Line Animation
+                AnimatedBuilder(
+                  animation: _animation,
+                  builder: (context, child) {
+                    return Positioned(
+                      top: 10 + _animation.value,
+                      left: 10,
+                      right: 10,
+                      child: Container(
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: AppColors.spotifyGreen,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.spotifyGreen.withOpacity(0.8),
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            )
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                // Corner guides
+                Positioned(top: 8, left: 8, child: Container(width: 20, height: 20, decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.spotifyGreen, width: 3), left: BorderSide(color: AppColors.spotifyGreen, width: 3))))),
+                Positioned(top: 8, right: 8, child: Container(width: 20, height: 20, decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.spotifyGreen, width: 3), right: BorderSide(color: AppColors.spotifyGreen, width: 3))))),
+                Positioned(bottom: 8, left: 8, child: Container(width: 20, height: 20, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.spotifyGreen, width: 3), left: BorderSide(color: AppColors.spotifyGreen, width: 3))))),
+                Positioned(bottom: 8, right: 8, child: Container(width: 20, height: 20, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.spotifyGreen, width: 3), right: BorderSide(color: AppColors.spotifyGreen, width: 3))))),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Align a Sportify Code or QR Code in the frame to automatically scan and play.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
   }
 }

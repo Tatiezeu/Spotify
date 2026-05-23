@@ -5,6 +5,7 @@ import '../core/constants/app_colors.dart';
 import '../core/constants/app_text_styles.dart';
 import '../models/song.dart';
 import '../providers/player_provider.dart';
+import '../utils/image_helper.dart';
 import 'home/home_screen.dart';
 import 'search/search_screen.dart';
 import 'library/library_screen.dart';
@@ -41,17 +42,34 @@ class _MainScreenState extends State<MainScreen> {
       drawer: _buildSidebar(context),
       body: Stack(
         children: [
+          // Main content screens (must render first and fill the screen)
           IndexedStack(
             index: _selectedIndex,
             children: _screens,
           ),
-          // Hidden YouTube Player (Alive globally)
+          // Global YouTube Player (hidden but alive so WKWebView allows active media playback on iOS)
+          // Must be >= 200x200 to satisfy YouTube IFrame API minimum size requirement.
+          // Positioned far off-screen to remain invisible while avoiding OS-level webview throttling.
           Positioned(
-            left: 0, top: 0,
+            left: -1000, top: -1000,
             child: SizedBox(
-              width: 1, height: 1,
-              child: YoutubePlayer(
-                controller: context.read<PlayerProvider>().controller,
+              width: 250, height: 250,
+              child: Opacity(
+                opacity: 0.01,
+                child: IgnorePointer(
+                  child: Consumer<PlayerProvider>(
+                    builder: (context, player, child) {
+                      try {
+                        return YoutubePlayer(
+                          controller: player.controller,
+                        );
+                      } catch (e) {
+                        debugPrint('YoutubePlayer render error: $e');
+                        return const SizedBox.shrink();
+                      }
+                    },
+                  ),
+                ),
               ),
             ),
           ),
@@ -102,7 +120,7 @@ class _MainScreenState extends State<MainScreen> {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
-                            child: Image.network(song.coverUrl, width: 44, height: 44, fit: BoxFit.cover),
+                            child: ImageHelper.imageWidget(song.coverUrl, width: 44, height: 44, fit: BoxFit.cover),
                           ),
                           const SizedBox(width: 12),
                           Expanded(

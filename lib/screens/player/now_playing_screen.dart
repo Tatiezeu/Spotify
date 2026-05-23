@@ -2,9 +2,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:palette_generator/palette_generator.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../models/song.dart';
+import '../../utils/image_helper.dart';
 import 'lyrics_screen.dart';
 import '../playlist/create_playlist_screen.dart';
 import 'queue_screen.dart';
@@ -27,6 +29,66 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   double _dragValue = 0.0;
   Future<List<Song>>? _relatedArtistsFuture;
   String? _lastArtistId;
+
+  // Dynamic Color Theme (extracted from cover image)
+  String? _lastSongId;
+  Color _coverColor = const Color(0xFF536D6D); // Default player background color
+  Color _lyricsCardColor = const Color(0xFF4A5D5D); // Default mini lyrics card color
+
+  // Dynamic Theme Extraction: Extracts a matching color palette from artwork
+  Future<void> _extractColors(String coverUrl, String songId) async {
+    if (_lastSongId == songId) return;
+    _lastSongId = songId;
+
+    try {
+      final imageProvider = ImageHelper.getImageProvider(coverUrl);
+      if (imageProvider == null) {
+        if (mounted) {
+          setState(() {
+            _coverColor = const Color(0xFF536D6D);
+            _lyricsCardColor = const Color(0xFF4A5D5D);
+          });
+        }
+        return;
+      }
+
+      final palette = await PaletteGenerator.fromImageProvider(
+        imageProvider,
+        maximumColorCount: 8,
+      );
+
+      if (mounted && _lastSongId == songId) {
+        setState(() {
+          final dominant = palette.dominantColor?.color;
+          final darkMuted = palette.darkMutedColor?.color;
+          final darkVibrant = palette.darkVibrantColor?.color;
+
+          // Main player background: darken vibrant/muted to ensure high premium contrast
+          Color baseColor = darkMuted ?? darkVibrant ?? dominant ?? const Color(0xFF536D6D);
+          if (baseColor.computeLuminance() > 0.35) {
+            baseColor = Color.alphaBlend(Colors.black.withOpacity(0.5), baseColor);
+          }
+          _coverColor = baseColor;
+
+          // Mini lyrics card container color: dynamic cover-derived tint
+          Color cardBase = darkVibrant ?? dominant ?? const Color(0xFF4A5D5D);
+          if (cardBase.computeLuminance() > 0.35) {
+            _lyricsCardColor = Color.alphaBlend(Colors.black.withOpacity(0.4), cardBase);
+          } else {
+            _lyricsCardColor = Color.alphaBlend(Colors.white.withOpacity(0.12), cardBase);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error extracting colors in player: $e');
+      if (mounted && _lastSongId == songId) {
+        setState(() {
+          _coverColor = const Color(0xFF536D6D);
+          _lyricsCardColor = const Color(0xFF4A5D5D);
+        });
+      }
+    }
+  }
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
@@ -68,6 +130,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       _relatedArtistsFuture = ApiService().getRelatedArtists(song.artistId);
     }
 
+    if (song != null && song.id != _lastSongId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _extractColors(song.coverUrl, song.id);
+      });
+    }
+
     if (song == null) {
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -76,7 +144,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF536D6D),
+      backgroundColor: _coverColor,
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -84,7 +152,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             end: Alignment.bottomCenter,
             colors: [
               Colors.black.withOpacity(0.2),
-              Colors.black.withOpacity(0.5),
+              Colors.black.withOpacity(0.55),
               AppColors.primaryBackground,
             ],
           ),
@@ -162,13 +230,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   ImageProvider _getImageProvider(String url) {
-    if (url.startsWith('http') || url.startsWith('blob:')) {
-      return NetworkImage(url);
-    }
-    if (kIsWeb) {
-      return NetworkImage(url);
-    }
-    return FileImage(File(url));
+    return ImageHelper.getImageProvider(url) ?? const NetworkImage('https://via.placeholder.com/150');
   }
 
   Widget _buildAlbumArt(Song song) {
@@ -355,7 +417,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF4A5D5D),
+        color: _lyricsCardColor,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -530,7 +592,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   Widget _buildDNAArtist(String name, String role, String imageUrl) {
     return Column(
       children: [
-        CircleAvatar(radius: 45, backgroundImage: NetworkImage(imageUrl)),
+        CircleAvatar(radius: 45, backgroundImage: ImageHelper.getImageProvider(imageUrl)),
         const SizedBox(height: 8),
         Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
         Text(role, style: const TextStyle(color: Colors.white70, fontSize: 10)),
@@ -556,7 +618,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               image: DecorationImage(
                 image: _getImageProvider('https://picsum.photos/600/350?${song.artistId}'),
                 fit: BoxFit.cover,
-                onError: (exception, stackTrace) => _getImageProvider(song.coverUrl),
+                onError: (exception, stackTrace) {},
               ),
             ),
           ),

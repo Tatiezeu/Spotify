@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 import '../../providers/player_provider.dart';
 import '../player/now_playing_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../utils/image_helper.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -229,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          CircleAvatar(radius: 24, backgroundImage: NetworkImage(imageUrl)),
+          CircleAvatar(radius: 24, backgroundImage: _getImageProvider(imageUrl)),
           const SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -342,7 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Stack(
                 children: [
                   Positioned(top: 8, left: 8, child: Row(children: const [Icon(Icons.album, color: Colors.black, size: 14), SizedBox(width: 4), Text('RADIO', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10))])),
-                  Center(child: ClipRRect(borderRadius: BorderRadius.circular(100), child: Image.network(imageUrl, width: 140, height: 140, fit: BoxFit.cover))),
+                  Center(child: ClipRRect(borderRadius: BorderRadius.circular(100), child: ImageHelper.imageWidget(imageUrl, width: 140, height: 140, fit: BoxFit.cover))),
                   Positioned(bottom: 12, left: 12, child: Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 32, color: Colors.black))),
                 ],
               ),
@@ -392,7 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Positioned(top: 8, right: 8, child: const Icon(Icons.album, color: Colors.black, size: 14)),
                   const Positioned(top: 8, left: 8, child: Text('RADIO', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10))),
-                  Center(child: CircleAvatar(radius: 60, backgroundImage: NetworkImage(imageUrl))),
+                  Center(child: CircleAvatar(radius: 60, backgroundImage: _getImageProvider(imageUrl))),
                   Positioned(bottom: 8, left: 8, child: Text(title, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 18))),
                 ],
               ),
@@ -503,7 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(4),
-                image: DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover),
+                image: DecorationImage(image: _getImageProvider(imageUrl), fit: BoxFit.cover),
               ),
               child: Stack(
                 children: [
@@ -547,7 +548,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Stack(
               children: [
-                ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(imageUrl, width: 160, height: 160, fit: BoxFit.cover)),
+                ClipRRect(borderRadius: BorderRadius.circular(8), child: ImageHelper.imageWidget(imageUrl, width: 160, height: 160, fit: BoxFit.cover)),
                 Positioned(bottom: 12, left: 0, child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), color: tagColor, child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)))),
               ],
             ),
@@ -578,12 +579,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
                         child: Stack(
                           children: [
-                            Center(child: CircleAvatar(radius: 50, backgroundImage: NetworkImage(imageUrl))),
+                            Center(child: CircleAvatar(radius: 50, backgroundImage: _getImageProvider(imageUrl))),
                             Positioned(top: 8, left: 8, child: Row(children: const [Icon(Icons.album, color: Colors.black, size: 10), SizedBox(width: 4), Text('RADIO', style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold))])),
                           ],
                         ),
                       )
-                    : Image.network(imageUrl, width: 120, height: 120, fit: BoxFit.cover),
+                    : ImageHelper.imageWidget(imageUrl, width: 120, height: 120, fit: BoxFit.cover),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -655,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(imageUrl, width: 120, height: 120, fit: BoxFit.cover)),
+                ClipRRect(borderRadius: BorderRadius.circular(4), child: ImageHelper.imageWidget(imageUrl, width: 120, height: 120, fit: BoxFit.cover)),
                 if (isEpisode)
                   Positioned(
                     bottom: -6,
@@ -735,7 +736,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   image: DecorationImage(
                     image: _getImageProvider(imageUrl), 
                     fit: BoxFit.cover,
-                    onError: (exception, stackTrace) => const AssetImage('assets/images/placeholder.png'),
+                    onError: (exception, stackTrace) {},
                   )
                 )
               ),
@@ -790,7 +791,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(imageUrl, width: 90, height: 90, fit: BoxFit.cover)),
+                    ClipRRect(borderRadius: BorderRadius.circular(8), child: ImageHelper.imageWidget(imageUrl, width: 90, height: 90, fit: BoxFit.cover)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(

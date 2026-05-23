@@ -5,6 +5,8 @@ import '../models/playlist.dart';
 import '../providers/player_provider.dart';
 import '../services/api_service.dart';
 import '../core/constants/app_colors.dart';
+import '../screens/artist/artist_screen.dart';
+import '../screens/playlist/create_playlist_screen.dart';
 
 class SongOptionsHelper {
   static void showSongOptions(BuildContext context, Song song, {String? playlistId, VoidCallback? onRemove}) {
@@ -41,6 +43,31 @@ class SongOptionsHelper {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Will play next'), duration: Duration(seconds: 1)),
                 );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline, color: Colors.white70),
+              title: const Text('Go to Artist', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                if (song.artistId.isNotEmpty) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ArtistScreen(
+                        artistId: song.artistId,
+                        artistName: song.artist,
+                      ),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Artist details not available for "${song.artist}"'),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
               },
             ),
             if (playlistId != null)
@@ -133,6 +160,22 @@ class _PlaylistPickerSheetState extends State<_PlaylistPickerSheet> {
     }
   }
 
+  void _showCreatePlaylistDialog(BuildContext context, Song song) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreatePlaylistScreen(initialSong: song),
+      ),
+    ).then((created) {
+      if (created == true && context.mounted) {
+        // Re-open playlist picker or show success toast
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Playlist created and song added!'), backgroundColor: AppColors.spotifyGreen),
+        );
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -144,30 +187,45 @@ class _PlaylistPickerSheetState extends State<_PlaylistPickerSheet> {
           const SizedBox(height: 20),
           if (_isLoading)
             const Center(child: CircularProgressIndicator(color: AppColors.spotifyGreen))
-          else if (_playlists.isEmpty)
-            const Center(child: Text('No playlists created yet.'))
-          else
-            Expanded(
-              child: ListView.builder(
-                itemCount: _playlists.length,
-                itemBuilder: (context, index) {
-                  final playlist = _playlists[index];
-                  return ListTile(
-                    leading: const Icon(Icons.playlist_play),
-                    title: Text(playlist.name),
-                    onTap: () async {
-                      final success = await ApiService().addTrackToPlaylist(playlist.id, widget.song);
-                      if (mounted) {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(success ? 'Added to ${playlist.name}' : 'Already in playlist')),
-                        );
-                      }
-                    },
-                  );
-                },
-              ),
+          else ...[
+            ListTile(
+              leading: const Icon(Icons.add, color: AppColors.spotifyGreen),
+              title: const Text('New Playlist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              onTap: () {
+                Navigator.pop(context);
+                _showCreatePlaylistDialog(context, widget.song);
+              },
             ),
+            const Divider(color: Colors.white10),
+            Expanded(
+              child: _playlists.isEmpty
+                  ? const Center(child: Text('No playlists created yet.', style: TextStyle(color: Colors.white54)))
+                    : ListView.builder(
+                      itemCount: _playlists.length,
+                      itemBuilder: (ctx, index) {
+                        final playlist = _playlists[index];
+                        return ListTile(
+                          leading: const Icon(Icons.playlist_play, color: Colors.white70),
+                          title: Text(playlist.name, style: const TextStyle(color: Colors.white)),
+                          onTap: () async {
+                            final navigator = Navigator.of(context);
+                            final messenger = ScaffoldMessenger.of(context);
+                            final success = await ApiService().addTrackToPlaylist(playlist.id, widget.song);
+                            if (mounted) {
+                              navigator.pop();
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(success ? 'Added to ${playlist.name}' : 'Already in playlist'),
+                                  backgroundColor: success ? AppColors.spotifyGreen : Colors.grey[800],
+                                ),
+                              );
+                            }
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
         ],
       ),
     );

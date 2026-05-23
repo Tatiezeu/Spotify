@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_text_styles.dart';
 import '../models/song.dart';
+import '../utils/image_helper.dart';
 
 class SongRow extends StatelessWidget {
   final Song song;
@@ -47,7 +48,7 @@ class SongRow extends StatelessWidget {
             if (showAlbumArt)
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
-                child: Image.network(
+                child: ImageHelper.imageWidget(
                   song.coverUrl,
                   width: 48,
                   height: 48,
